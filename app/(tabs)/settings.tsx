@@ -1,61 +1,33 @@
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Platform } from 'react-native';
+// app/(tabs)/settings.tsx
+import React, { useState, useEffect } from 'react';
+import { View, Text, Switch, StyleSheet, Alert,TouchableOpacity } from 'react-native';
 import { Bell, Moon, Volume2, MapPin, Lock, Shield, Trash2, CircleHelp as HelpCircle } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
-import { useRouter } from "expo-router";
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Stack, useRouter } from 'expo-router';
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
-// import { api } from '@/utils/api';
-
-interface Settings {
-  notifications: boolean;
-  darkMode: boolean;
-  soundEffects: boolean;
-  locationTracking: boolean;
-  biometricLock: boolean;
-}
 
 export default function SettingsScreen() {
   const router = useRouter(); // ✅ Initialize useRouter inside the component
 
-  const [settings, setSettings] = useState<Settings>({
-    notifications: true,
-    darkMode: true,
-    soundEffects: true,
-    locationTracking: true,
-    biometricLock: false,
-  });
-  const [loading, setLoading] = useState(true);
+  const [isBackgroundTrackingEnabled, setIsBackgroundTrackingEnabled] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
-    try {
-      // const response = await api.get('/api/settings');
-      // setSettings(response.data);
-      setLoading(false);
-    } catch (error) {
-      console.error('Failed to load settings:', error);
-      setLoading(false);
-    }
-  };
-
-  const handleToggle = async (key: keyof Settings) => {
-    try {
-      if (Platform.OS !== 'web') {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // Check if background tracking is enabled
+    const checkBackgroundTracking = async () => {
+      try {
+        const enabled = await AsyncStorage.getItem('backgroundTrackingEnabled');
+        setIsBackgroundTrackingEnabled(enabled === 'true');
+        setIsLoading(false);
+      } catch (error) {
+        console.error("Error checking background tracking status:", error);
+        setIsLoading(false);
       }
-      
-      const newValue = !settings[key];
-      // await api.post('/api/settings/update', { [key]: newValue });
-      setSettings(prev => ({ ...prev, [key]: newValue }));
-    } catch (error) {
-      console.error('Failed to update setting:', error);
-    }
-  };
+    };
+
+    checkBackgroundTracking();
+  }, []);
   const handleSignOut = async () => {
     try {
       await AsyncStorage.removeItem("authToken"); // Remove stored authentication token
@@ -64,37 +36,62 @@ export default function SettingsScreen() {
       console.error("Error signing out:", error);
     }
   };
-  const SettingItem = ({ 
-    icon: Icon, 
-    title, 
-    description, 
-    value, 
-    onToggle 
-  }: {
-    icon: any,
-    title: string,
-    description: string,
-    value: boolean,
-    onToggle: () => void
-  }) => (
-    <View style={styles.settingItem}>
-      <View style={styles.settingIcon}>
-        <Icon size={24} color="#00ff9d" />
-      </View>
-      <View style={styles.settingContent}>
-        <Text style={styles.settingTitle}>{title}</Text>
-        <Text style={styles.settingDescription}>{description}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        trackColor={{ false: '#333', true: '#00ff9d' }}
-        thumbColor={value ? '#fff' : '#666'}
-      />
-    </View>
-  );
 
-  if (loading) {
+  const handleBackgroundTrackingToggle = async (value: boolean) => {
+    if (value) {
+      // If turning on, request permissions
+      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+      if (foregroundStatus !== 'granted') {
+        Alert.alert(
+          'Location Permission Required',
+          'EchoSpot needs location permission to discover nearby voice notes.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+      if (backgroundStatus !== 'granted') {
+        Alert.alert(
+          'Background Location Permission Required',
+          'EchoSpot needs background location permission to discover nearby voice notes even when the app is closed.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Start background location tracking
+      const LOCATION_TASK_NAME = 'background-location-task';
+      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+      
+      if (!hasStarted) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 300000,
+          distanceInterval: 100,
+          foregroundService: {
+            notificationTitle: "EchoSpot is using your location",
+            notificationBody: "To discover nearby voice notes",
+            notificationColor: "#00ff9d"
+          },
+        });
+      }
+    } else {
+      // Stop background location tracking
+      const LOCATION_TASK_NAME = 'background-location-task';
+      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
+      
+      if (hasStarted) {
+        await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      }
+    }
+
+    // Save preference
+    await AsyncStorage.setItem('backgroundTrackingEnabled', value ? 'true' : 'false');
+    setIsBackgroundTrackingEnabled(value);
+  };
+
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <Text style={styles.loadingText}>Loading settings...</Text>
@@ -103,106 +100,64 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Notifications</Text>
-        <SettingItem
-          icon={Bell}
-          title="Push Notifications"
-          description="Receive alerts for nearby voice notes"
-          value={settings.notifications}
-          onToggle={() => handleToggle('notifications')}
-        />
-        <SettingItem
-          icon={Volume2}
-          title="Sound Effects"
-          description="Play sounds for interactions"
-          value={settings.soundEffects}
-          onToggle={() => handleToggle('soundEffects')}
+    <View style={styles.container}>
+      <Text style={styles.title}>Settings</Text>
+      
+      <View style={styles.settingItem}>
+        <Text style={styles.settingLabel}>Background Location Tracking</Text>
+        <Switch
+          trackColor={{ false: '#767577', true: '#4caf5077' }}
+          thumbColor={isBackgroundTrackingEnabled ? '#4caf50' : '#f4f3f4'}
+          ios_backgroundColor="#3e3e3e"
+          onValueChange={handleBackgroundTrackingToggle}
+          value={isBackgroundTrackingEnabled}
         />
       </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Privacy & Security</Text>
-        <SettingItem
-          icon={MapPin}
-          title="Location Tracking"
-          description="Allow background location updates"
-          value={settings.locationTracking}
-          onToggle={() => handleToggle('locationTracking')}
-        />
-        <SettingItem
-          icon={Lock}
-          title="Biometric Lock"
-          description="Secure app with biometric authentication"
-          value={settings.biometricLock}
-          onToggle={() => handleToggle('biometricLock')}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Appearance</Text>
-        <SettingItem
-          icon={Moon}
-          title="Dark Mode"
-          description="Use dark theme throughout the app"
-          value={settings.darkMode}
-          onToggle={() => handleToggle('darkMode')}
-        />
-      </View>
-
+      
+      <Text style={styles.helpText}>
+        When enabled, EchoSpot will check for nearby voice notes even when the app is closed.
+        This helps you discover notes left by others without having to keep the app open.
+      </Text>
       <TouchableOpacity style={styles.dangerButton} onPress={handleSignOut}>
         <Trash2 size={24} color="#ff4d4d" />
         <Text style={styles.dangerButtonText}>sign out</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
-  },
-  section: {
+    backgroundColor: '#121212',
     padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
   },
-  sectionTitle: {
-    fontSize: 18,
+  title: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 15,
+    marginBottom: 20,
+    marginTop: 50,
   },
   settingItem: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
   },
-  settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#333',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  settingContent: {
-    flex: 1,
-  },
-  settingTitle: {
+  settingLabel: {
     fontSize: 16,
-    fontWeight: '600',
     color: '#fff',
-    marginBottom: 4,
   },
-  settingDescription: {
+  helpText: {
+    marginTop: 10,
     fontSize: 14,
-    color: '#888',
+    color: '#aaa',
+    lineHeight: 20,
   },
-  dangerButton: {
+    dangerButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -221,6 +176,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: 50,
   },
 });

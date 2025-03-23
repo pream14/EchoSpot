@@ -11,7 +11,7 @@ import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Mic, Square, Play, MapPin, Save, Trash2, Upload, StopCircle } from "lucide-react-native";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Marker } from "react-native-maps";
 import uuid from "react-native-uuid";
 import * as DocumentPicker from "expo-document-picker";
 
@@ -192,11 +192,17 @@ export default function RecordScreen() {
     setCustomLocation(event.nativeEvent.coordinate);
   };
 
+  const formatDuration = (milliseconds: number) => {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
   return (
     <View style={styles.container}>
       {location && (
         <MapView
-          provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
           style={styles.map}
           initialRegion={{
             latitude: location.coords.latitude,
@@ -214,8 +220,8 @@ export default function RecordScreen() {
 
           {customLocation && (
             <Marker coordinate={customLocation}>
-              <View style={styles.marker}>
-                <MapPin size={20} color="#00ff9d" />
+              <View style={[styles.marker, styles.customMarker]}>
+                <MapPin size={20} color="#fff" />
               </View>
             </Marker>
           )}
@@ -230,6 +236,12 @@ export default function RecordScreen() {
           value={title}
           onChangeText={setTitle}
         />
+
+        {isRecording && (
+          <Text style={styles.durationText}>
+            Recording: {formatDuration(duration)}
+          </Text>
+        )}
 
         <TouchableOpacity style={styles.uploadButton} onPress={pickAudioFile}>
           <Upload size={24} color="#fff" />
@@ -269,6 +281,7 @@ export default function RecordScreen() {
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -285,28 +298,31 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
+  customMarker: {
+    backgroundColor: '#00ff9d',
+  },
   uploadButton: {
-    backgroundColor: 'green', // A vibrant blue color
+    backgroundColor: 'green',
     paddingVertical: 12,
     paddingHorizontal: 25,
     borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
-    elevation: 5, // Android shadow
-    shadowColor: '#00c9ff', // iOS shadow
+    elevation: 5,
+    shadowColor: '#00c9ff',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
-    flexDirection: 'row', // To align an icon if needed
+    flexDirection: 'row',
+    marginVertical: 15,
   },
-  
   uploadText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+    marginLeft: 8,
   },
-  
   controls: {
     flex: 1,
     padding: 20,
@@ -329,7 +345,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
   },
-  
   durationText: {
     color: '#fff',
     fontSize: 18,
@@ -341,6 +356,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 20,
+    marginBottom: 20,
   },
   recordButton: {
     width: 80,
@@ -371,18 +387,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
   },
-
-
-noteItem: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  padding: 15,
-  backgroundColor: '#333',
-  marginVertical: 5,
-  borderRadius: 8,
-},
-noteTitle: {
-  color: '#fff',
-  fontSize: 16,
-},
+  noteItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 15,
+    backgroundColor: '#333',
+    marginVertical: 5,
+    borderRadius: 8,
+  },
+  noteTitle: {
+    color: '#fff',
+    fontSize: 16,
+  },
 });

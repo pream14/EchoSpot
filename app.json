@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "bolt-expo-nativewind",
+    "name": "Echo spot",
     "slug": "bolt-expo-nativewind",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,21 +9,69 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location",
+          "fetch",
+          "remote-notification"
+        ],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow EchoSpot to use your location to discover nearby voice notes, even when the app is closed.",
+        "NSLocationAlwaysUsageDescription": "Allow EchoSpot to use your location in the background to discover nearby voice notes.",
+        "NSLocationWhenInUseUsageDescription": "Allow EchoSpot to use your location to discover nearby voice notes."
+      }
     },
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": [
-      "expo-router"
-    ],
+"plugins": [
+  [
+    "expo-location",
+    {
+      "locationAlwaysAndWhenInUsePermission": "Allow EchoSpot to use your location to discover nearby voice notes, even when the app is closed.",
+      "locationAlwaysPermission": "Allow EchoSpot to use your location in the background to discover nearby voice notes.",
+      "locationWhenInUsePermission": "Allow EchoSpot to use your location to discover nearby voice notes.",
+      "isIosBackgroundLocationEnabled": true,
+      "isAndroidBackgroundLocationEnabled": true
+    }
+  ],
+  [
+    "expo-build-properties",
+    {
+      "android": {
+        "compileSdkVersion": 35,
+        "targetSdkVersion": 35,
+        "minSdkVersion": 24
+      }
+    }
+  ]
+]
+,
     "experiments": {
       "typedRoutes": true
     },
     "android": {
-      "package": "com.echospot"
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "RECEIVE_BOOT_COMPLETED",
+        "FOREGROUND_SERVICE_LOCATION",
+        "VIBRATE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
+      ],
+      "package": "com.pream14.echospot"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "be199bca-2947-44ea-9026-fd65efe49c51"
+      }
     }
   }
 }

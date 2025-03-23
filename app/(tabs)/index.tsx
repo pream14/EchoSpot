@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import MapView, { Marker } from 'react-native-maps'; // Removed PROVIDER_GOOGLE
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { MapPin, Plus, RefreshCw } from 'lucide-react-native';
@@ -84,7 +84,7 @@ export default function MapScreen() {
     if (!location) return;
   
     // Use audioUri instead of audioUrl
-    const audioSource =  note.audioUrl; 
+    const audioSource = note.audioUrl; 
   
     if (!audioSource) {
       console.error('Error: Audio source is missing for this note', note);
@@ -146,7 +146,7 @@ export default function MapScreen() {
         <ActivityIndicator size="large" color="#00ff9d" style={styles.loading} />
       ) : location ? (
         <MapView
-          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+          // Removed provider property to use the default provider (OSM-based on Android)
           style={styles.map}
           initialRegion={{
             latitude: location.coords.latitude,
@@ -155,25 +155,24 @@ export default function MapScreen() {
             longitudeDelta: 0.01,
           }}>
           {/* Show User's Location */}
-<Marker coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }} title="You are here">
-  <View style={styles.blueDot} />
-</Marker>
+          <Marker coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }} title="You are here">
+            <View style={styles.blueDot} />
+          </Marker>
 
           {/* Show Saved Voice Notes */}
           {voiceNotes.map((note, index) => (
-  <Marker
-    key={note.id || `marker-${index}`} // Ensure a unique key
-    coordinate={{
-      latitude: note.latitude,
-      longitude: note.longitude,
-    }}
-    onPress={() => handleMarkerPress(note)}>
-    <View style={[styles.marker, note.isDiscovered && styles.markerDiscovered]}>
-      <MapPin size={20} color={note.isDiscovered ? '#00ff9d' : '#fff'} />
-    </View>
-  </Marker>
-))}
-
+            <Marker
+              key={note.id || `marker-${index}`}
+              coordinate={{
+                latitude: note.latitude,
+                longitude: note.longitude,
+              }}
+              onPress={() => handleMarkerPress(note)}>
+              <View style={[styles.marker, note.isDiscovered && styles.markerDiscovered]}>
+                <MapPin size={20} color={note.isDiscovered ? '#00ff9d' : '#fff'} />
+              </View>
+            </Marker>
+          ))}
         </MapView>
       ) : (
         <Text style={styles.errorText}>Location permission denied or not available.</Text>
@@ -220,17 +219,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
-
   blueDot: {
-    width: 14,  // Increased size
+    width: 14,
     height: 14,
-    backgroundColor: '#0084ff', // Blue color
-    borderRadius: 7, // Half of width/height to keep it circular
-    borderWidth: 3, // Slightly thicker border
-    borderColor: '#add8e6', // White border for visibility
+    backgroundColor: '#0084ff',
+    borderRadius: 7,
+    borderWidth: 3,
+    borderColor: '#add8e6',
   },
-  
-  
   markerDiscovered: { backgroundColor: '#1a1a1a' },
   noteInfo: {
     position: 'absolute',
