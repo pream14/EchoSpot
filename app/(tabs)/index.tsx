@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import MapView, { Marker } from 'react-native-maps'; // Removed PROVIDER_GOOGLE
+import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { MapPin, Plus, RefreshCw } from 'lucide-react-native';
@@ -17,6 +17,7 @@ interface VoiceNote {
 }
 
 const LOCATION_THRESHOLD = 50; // meters
+const OSM_TILE_URL = "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"; // OpenStreetMap tile server
 
 export default function MapScreen() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -36,7 +37,6 @@ export default function MapScreen() {
     };
   }, []);
 
-  // Load location and voice notes
   const loadMapData = async () => {
     setLoading(true);
     await loadVoiceNotes();
@@ -53,7 +53,6 @@ export default function MapScreen() {
     setLoading(false);
   };
 
-  // Load saved voice notes from AsyncStorage
   const loadVoiceNotes = async () => {
     try {
       const savedNotes = await AsyncStorage.getItem('savedNotes');
@@ -82,51 +81,45 @@ export default function MapScreen() {
 
   const handleMarkerPress = async (note: VoiceNote) => {
     if (!location) return;
-  
-    // Use audioUri instead of audioUrl
-    const audioSource = note.audioUrl; 
-  
+
+    const audioSource = note.audioUrl;
     if (!audioSource) {
       console.error('Error: Audio source is missing for this note', note);
       return;
     }
-  
+
     const distance = calculateDistance(
       location.coords.latitude,
       location.coords.longitude,
       note.latitude,
       note.longitude
     );
-  
+
     if (distance > LOCATION_THRESHOLD) {
       setSelectedNote(note);
       return;
     }
-  
+
     try {
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
       }
-  
-      console.log('Playing audio from:', audioSource); // Debugging log
-  
+
+      console.log('Playing audio from:', audioSource);
       const { sound } = await Audio.Sound.createAsync({ uri: audioSource });
       soundRef.current = sound;
       await sound.playAsync();
       setIsPlaying(true);
       setSelectedNote(note);
-  
+
       sound.setOnPlaybackStatusUpdate(async (status) => {
-        if (!status.isLoaded) {
-          return;
-        }
-      
-        if (status.didJustFinish) {  
+        if (!status.isLoaded) return;
+        if (status.didJustFinish) {
           setIsPlaying(false);
           await sound.unloadAsync();
         }
       });
-      
+
     } catch (error) {
       console.error('Error playing audio:', error);
     }
@@ -146,20 +139,20 @@ export default function MapScreen() {
         <ActivityIndicator size="large" color="#00ff9d" style={styles.loading} />
       ) : location ? (
         <MapView
-          // Removed provider property to use the default provider (OSM-based on Android)
           style={styles.map}
           initialRegion={{
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
-          }}>
-          {/* Show User's Location */}
+          }}
+        >
+          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} />
+
           <Marker coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }} title="You are here">
             <View style={styles.blueDot} />
           </Marker>
 
-          {/* Show Saved Voice Notes */}
           {voiceNotes.map((note, index) => (
             <Marker
               key={note.id || `marker-${index}`}
@@ -196,12 +189,10 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* Refresh Button */}
       <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
         <RefreshCw size={24} color="#fff" />
       </TouchableOpacity>
 
-      {/* Add Note Button */}
       <TouchableOpacity style={styles.addButton} onPress={handleAddNote}>
         <Plus size={24} color="#fff" />
       </TouchableOpacity>
@@ -228,41 +219,11 @@ const styles = StyleSheet.create({
     borderColor: '#add8e6',
   },
   markerDiscovered: { backgroundColor: '#1a1a1a' },
-  noteInfo: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(26, 26, 26, 0.9)',
-    padding: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
+  noteInfo: { position: 'absolute', bottom: 20, left: 20, right: 20, backgroundColor: 'rgba(26, 26, 26, 0.9)', padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#333' },
   noteTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
   noteDistance: { fontSize: 14, color: '#888' },
-  addButton: {
-    position: 'absolute',
-    bottom: 100,
-    right: 20,
-    backgroundColor: '#00ff9d',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  refreshButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    backgroundColor: '#ff4d4d',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  addButton: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#00ff9d', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
+  refreshButton: { position: 'absolute', top: 50, right: 20, backgroundColor: '#ff4d4d', width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   errorText: { color: '#ff4d4d', textAlign: 'center', marginTop: 20 },
 });

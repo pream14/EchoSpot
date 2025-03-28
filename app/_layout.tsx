@@ -21,7 +21,7 @@ export default function RootLayout() {
           return;
         }
 
-        const token = await AsyncStorage.getItem("authToken");
+        const token = await AsyncStorage.getItem("acessToken");
         console.log("Token:", token);
 
         if (!token) {

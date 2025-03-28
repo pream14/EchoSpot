@@ -1,23 +1,52 @@
 import { useState } from "react";
-import { View, TextInput, Button, Text, TouchableOpacity, StyleSheet } from "react-native"; // ✅ Add missing imports
+import { View, TextInput, Button, Text, TouchableOpacity, StyleSheet ,Alert} from "react-native"; // ✅ Add missing imports
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setusername] = useState("");
   const router = useRouter();
 
+
   const handleRegister = async () => {
-    // Store user credentials (Replace with real API call)
-    await AsyncStorage.setItem("authToken", "dummy_token");
-    router.replace("/(tabs)"); // Redirect to main app
+    try {
+      const response = await fetch("https://echo-trails-backend.vercel.app/users/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Registration failed");
+      }
+
+      const data = await response.json();
+      console.log(data);
+      // Save user data in AsyncStorage
+
+      // Redirect to main app
+      router.replace("/LoginScreen");
+    } catch (error) {
+      Alert.alert("Error", (error as Error).message);
+    }
   };
+  
 
  return (
     <View style={styles.container}>
-      <Text style={styles.title}>Login</Text>
-      
+      <Text style={styles.title}>Register</Text>
+
+      <TextInput
+        style={styles.input}
+        placeholder="User Name"
+        placeholderTextColor="#aaa"
+        value={username} // Use state variable
+        onChangeText={setusername} // Updates state on text change
+      />
       <TextInput
         style={styles.input}
         placeholder="Email"
@@ -36,7 +65,7 @@ export default function RegisterScreen() {
       />
 
       <TouchableOpacity style={styles.button} onPress={handleRegister}>
-        <Text style={styles.buttonText}>Login</Text>
+        <Text style={styles.buttonText}>Register</Text>
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.push("/LoginScreen")}>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, TextInput, Button, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, TextInput, Button, Text, TouchableOpacity, StyleSheet,Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 
@@ -9,20 +9,28 @@ export default function LoginScreen() {
   const router = useRouter();
 
   const handleLogin = async () => {
-    if (email === "test@example.com" && password === "password") {
-      const userData = {
-        email: "test@example.com",
-        token: "dummy_token",
-      };
-  
-      try {
-        await AsyncStorage.setItem("user", JSON.stringify(userData));
-        router.replace("/(tabs)"); // Redirect to main app
-      } catch (error) {
-        console.error("Error saving data:", error);
+    try {
+      const response = await fetch("https://echo-trails-backend.vercel.app/users/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Invalid credentials");
       }
-    } else {
-      alert("Invalid credentials");
+
+      const data = await response.json();
+      console.log(data);
+      // Store access token in AsyncStorage
+      await AsyncStorage.setItem("accessToken", data.access_token);
+
+      // Redirect to main app
+      router.replace("/(tabs)");
+    } catch (error) {
+      Alert.alert("Error", error instanceof Error ? error.message : "Something went wrong");
     }
   };
 

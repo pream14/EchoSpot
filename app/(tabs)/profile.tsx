@@ -8,19 +8,11 @@ interface UserProfile {
   email: string;
   notesCount: number;
   joinedDate: string;
-  avatar: string;
+  timeSinceJoining?: { value: number; label: string };
 }
 
-const defaultProfile: UserProfile = {
-  username: 'John Doe',
-  email: 'john.doe@example.com',
-  notesCount: 0,
-  joinedDate: '2024-01-01',
-  avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80',
-};
-
 export default function ProfileScreen() {
-  const [profile, setProfile] = useState<UserProfile>(defaultProfile);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,26 +20,63 @@ export default function ProfileScreen() {
     loadProfile();
   }, []);
 
+  const getTimeSinceJoining = (createdAt: string) => {
+    const createdDate = new Date(createdAt);
+    const currentDate = new Date();
+
+    const diffInMs = currentDate.getTime() - createdDate.getTime();
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInDays >= 365) {
+      const years = Math.floor(diffInDays / 365);
+      return { value: years, label: years === 1 ? 'Year' : 'Years' };
+    } else if (diffInDays >= 30) {
+      const months = Math.floor(diffInDays / 30);
+      return { value: months, label: months === 1 ? 'Month' : 'Months' };
+    } else {
+      return { value: diffInDays, label: diffInDays === 1 ? 'Day' : 'Days' };
+    }
+  };
+
   const loadProfile = async () => {
     try {
-      const storedProfile = await AsyncStorage.getItem('user');
-      const userProfile: UserProfile = storedProfile ? JSON.parse(storedProfile) : defaultProfile;
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
 
-      // Fetch saved notes and update the count
+      const response = await fetch('https://echo-trails-backend.vercel.app/users/identify', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch user data');
+
+      const data = await response.json();
+      if (!data.token_info.token_valid) throw new Error('Token expired');
+
+      const timeSinceJoining = getTimeSinceJoining(data.user_data.created_at);
+
+      const userProfile: UserProfile = {
+        username: data.user_data.username,
+        email: data.user_data.email,
+        notesCount: 0,
+        joinedDate: new Date(data.user_data.created_at).toDateString(),
+        timeSinceJoining
+      };
+
       const voiceNotes = await AsyncStorage.getItem('savedNotes');
       const voiceNotesArray = voiceNotes ? JSON.parse(voiceNotes) : [];
-      const notesCount = Array.isArray(voiceNotesArray) ? voiceNotesArray.length : 0;
+      userProfile.notesCount = Array.isArray(voiceNotesArray) ? voiceNotesArray.length : 0;
 
-      // Update profile with correct notes count
-      const updatedProfile = { ...userProfile, notesCount };
-      setProfile(updatedProfile);
+      setProfile(userProfile);
+      await AsyncStorage.setItem('userProfile', JSON.stringify(userProfile));
 
-      // Save updated profile
-      await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
-
-      setLoading(false);
     } catch (err) {
-      setError('Failed to load profile');
+      const errorMessage = (err as Error).message || 'Failed to load profile';
+      setError(errorMessage);
+    } finally {
       setLoading(false);
     }
   };
@@ -55,7 +84,7 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading profile...</Text>
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
@@ -73,18 +102,17 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <Image style={styles.coverImage} />
         <View style={styles.profileImageContainer}>
-          <Image source={{ uri: profile.avatar }} style={styles.profileImage} />
         </View>
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.name}>{profile.username}</Text>
-        <Text style={styles.email}>{profile.email}</Text>
+        <Text style={styles.name}>{profile?.username}</Text>
+        <Text style={styles.email}>{profile?.email}</Text>
 
         <View style={styles.statsContainer}>
           <View style={styles.statItem}>
             <MapPin size={24} color="#00ff9d" />
-            <Text style={styles.statNumber}>{profile.notesCount}</Text>
+            <Text style={styles.statNumber}>{profile?.notesCount}</Text>
             <Text style={styles.statLabel}>Voice Notes</Text>
           </View>
           <View style={styles.statItem}>
@@ -94,8 +122,8 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.statItem}>
             <User size={24} color="#00ff9d" />
-            <Text style={styles.statNumber}>3</Text>
-            <Text style={styles.statLabel}>Months</Text>
+            <Text style={styles.statNumber}>{profile?.timeSinceJoining?.value}</Text>
+            <Text style={styles.statLabel}>{profile?.timeSinceJoining?.label}</Text>
           </View>
         </View>
       </View>
@@ -182,4 +210,3 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
 });
-
