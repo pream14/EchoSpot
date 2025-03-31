@@ -252,43 +252,63 @@ export default function RecordScreen() {
   };
 
   const onChangeDatePicker = (event: any, selectedDate?: Date) => {
-    const currentDate = selectedDate || hiddenUntil;
+    // Handle cancelled selection
+    if (!selectedDate) {
+      setShowDatePicker(false);
+      return;
+    }
+    
+    const currentDate = selectedDate;
     
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
       
       // If we're in date mode and a valid date was selected, 
       // switch to time mode after selecting the date (Android only)
-      if (datePickerMode === 'date' && selectedDate) {
+      if (datePickerMode === 'date') {
+        // Copy the selected date's date part to the existing hiddenUntil value
+        const newDate = new Date(hiddenUntil);
+        newDate.setFullYear(currentDate.getFullYear());
+        newDate.setMonth(currentDate.getMonth());
+        newDate.setDate(currentDate.getDate());
+        
+        setHiddenUntil(newDate);
+        
+        // Now show the time picker
         setTimeout(() => {
           setDatePickerMode('time');
           setShowDatePicker(true);
         }, 100);
-      } else if (datePickerMode === 'time' && selectedDate) {
-        // We've completed the time selection, ensure it's a future date
+      } else if (datePickerMode === 'time') {
+        // Copy the selected time to the existing hiddenUntil value
+        const newDate = new Date(hiddenUntil);
+        newDate.setHours(currentDate.getHours());
+        newDate.setMinutes(currentDate.getMinutes());
+        
+        // Ensure it's a future date
         const now = new Date();
-        if (currentDate <= now) {
+        if (newDate <= now) {
           Alert.alert("Invalid Date", "Please select a future date and time.");
           return;
         }
         
-        setHiddenUntil(currentDate);
+        setHiddenUntil(newDate);
         setDatePickerMode('date'); // Reset for next time
       }
     } else {
-      // For iOS, both date and time can be selected at once via the spinner
-      if (selectedDate) {
-        const now = new Date();
-        if (selectedDate <= now) {
-          Alert.alert("Invalid Date", "Please select a future date and time.");
-          return;
-        }
-        
-        setHiddenUntil(selectedDate);
+      // For iOS, both date and time are selected at once
+      // Ensure it's a future date
+      const now = new Date();
+      if (currentDate <= now) {
+        Alert.alert("Invalid Date", "Please select a future date and time.");
+        return;
       }
+      
+      setHiddenUntil(currentDate);
+      setShowDatePicker(false);
     }
   };
-
+  
   const showDatePickerModal = () => {
     if (Platform.OS === 'android') {
       // On Android, we need to show date first, then time
