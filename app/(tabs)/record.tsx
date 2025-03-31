@@ -11,16 +11,7 @@ import {
 import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { 
-  Mic, 
-  Square, 
-  Play, 
-  MapPin, 
-  Save, 
-  Upload, 
-  StopCircle,
-  Calendar
-} from "lucide-react-native";
+import {Mic,Square,Play,MapPin,Save,Upload,StopCircle,Calendar} from "lucide-react-native";
 import MapView, { Marker } from "react-native-maps";
 import * as DocumentPicker from "expo-document-picker";
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -32,6 +23,7 @@ const MAX_DURATION = 60000; // 60 seconds
 
 type Note = {
   id: string;
+  title: string; // Add title to the Note type
   latitude: number;
   longitude: number;
   range: number;
@@ -181,6 +173,12 @@ export default function RecordScreen() {
     if (!recordingUri) return;
 
     try {
+      // Validate title is provided
+      if (!title.trim()) {
+        Alert.alert("Error", "Please enter a title for your voice note.");
+        return;
+      }
+      
       setIsUploading(true);
 
       let noteLocation = customLocation || location?.coords;
@@ -193,15 +191,18 @@ export default function RecordScreen() {
       // Upload the audio file with the user-selected date and range
       const uploadResult = await uploadAudioFile({
         audioUri: recordingUri,
+        title: title.trim(), // Add the title to the upload parameters
         latitude: noteLocation.latitude,
         longitude: noteLocation.longitude,
         range: range, // Use the user-defined range
         hiddenUntil: hiddenUntil // User selected date from the calendar
       });
-        console.log(uploadResult)
+      console.log(uploadResult)
+      
       // Create a new note with the server-generated ID
       const newNote: Note = {
         id: uploadResult.id,
+        title: title.trim(), // Store the title in the local note
         latitude: noteLocation.latitude,
         longitude: noteLocation.longitude,
         range: uploadResult.range,
@@ -225,6 +226,7 @@ export default function RecordScreen() {
       Alert.alert("Success", "Voice note uploaded successfully");
     } catch (error) {
       console.error("Failed to save voice note:", error);
+      Alert.alert("Error", "Failed to upload voice note. Please try again.");
     } finally {
       setIsUploading(false);
     }
@@ -355,7 +357,15 @@ export default function RecordScreen() {
       )}
 
       <View style={styles.controls}>
-
+        {/* Title Input Field */}
+        <TextInput
+          style={styles.input}
+          placeholder="Enter a title for your voice note"
+          placeholderTextColor="#888"
+          value={title}
+          onChangeText={setTitle}
+          editable={!isUploading}
+        />
 
         {isRecording && (
           <Text style={styles.durationText}>
@@ -365,41 +375,42 @@ export default function RecordScreen() {
 
         {/* Range Selector */}
         <View style={styles.rangeContainer}>
-  <Text style={styles.rangeLabel}>Range: {range} meters</Text>
-  <View style={styles.rangeInputContainer}>
-    <Text style={styles.rangeValue}>100m</Text>
-    <TextInput
-      style={styles.rangeInput}
-      value={String(range)}
-      onChangeText={(text) => {
-        // Allow empty text when backspacing
-        if (text === '') {
-          setRange(0);
-          return;
-        }
-        
-        // Only process numeric input
-        if (/^\d+$/.test(text)) {
-          const value = parseInt(text);
-          setRange(value);
-        }
-      }}
-      onBlur={() => {
-        // Validate the range only when user finishes editing
-        if (range < 100) {
-          setRange(100);
-        } else if (range > 5000) {
-          setRange(5000);
-        }
-      }}
-      keyboardType="numeric"
-      maxLength={4}
-      placeholderTextColor="#888"
-      placeholder="1000"
-    />
-    <Text style={styles.rangeValue}>5000m</Text>
-  </View>
-</View>
+          <Text style={styles.rangeLabel}>Range: {range} meters</Text>
+          <View style={styles.rangeInputContainer}>
+            <Text style={styles.rangeValue}>100m</Text>
+            <TextInput
+              style={styles.rangeInput}
+              value={String(range)}
+              onChangeText={(text) => {
+                // Allow empty text when backspacing
+                if (text === '') {
+                  setRange(0);
+                  return;
+                }
+                
+                // Only process numeric input
+                if (/^\d+$/.test(text)) {
+                  const value = parseInt(text);
+                  setRange(value);
+                }
+              }}
+              onBlur={() => {
+                // Validate the range only when user finishes editing
+                if (range < 100) {
+                  setRange(100);
+                } else if (range > 5000) {
+                  setRange(5000);
+                }
+              }}
+              keyboardType="numeric"
+              maxLength={4}
+              placeholderTextColor="#888"
+              placeholder="1000"
+              editable={!isUploading}
+            />
+            <Text style={styles.rangeValue}>5000m</Text>
+          </View>
+        </View>
         {/* Date Time Selector */}
         <TouchableOpacity 
           style={styles.datePickerButton} 
@@ -564,6 +575,7 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 8,
     fontSize: 16,
+    marginBottom: 10,
   },
   noteActions: {
     flexDirection: "row",

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, FlatList } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, FlatList,Alert } from 'react-native';
 import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
@@ -122,154 +122,120 @@ export default function MapScreen() {
     }
   };
 
-  const loadMapData = async () => {
-    setLoading(true);
-    // Load notes first, then fetch audio files
-    await loadVoiceNotes();
-    await fetchAudioFiles();
-
+  // Replace the existing loadMapData function with this improved version
+const loadMapData = async () => {
+  setLoading(true);
+  
+  try {
+    // Get current location first so it's available sooner
     const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      console.warn('Location permission not granted');
-      setLoading(false);
-      return;
-    }
-
-    try {
+    if (status === 'granted') {
       const currentLocation = await Location.getCurrentPositionAsync({});
       setLocation(currentLocation);
-    } catch (error) {
-      console.error('Error getting current position:', error);
+    } else {
+      console.warn('Location permission not granted');
     }
     
+    // Clear existing voice notes before fetching new ones
+    // This ensures deleted notes won't persist
+    setVoiceNotes([]);
+    setHiddenNotes([]);
+    
+    // Fetch fresh audio files from the API
+    await fetchAudioFilesRefresh();
+  } catch (error) {
+    console.error('Error refreshing data:', error);
+  } finally {
     setLoading(false);
-  };
+  }
+};
 
-  const loadVoiceNotes = async () => {
-    try {
-      const savedNotes = await AsyncStorage.getItem('savedNotes');
-      if (savedNotes) {
-        // Parse saved notes and ensure they have unique IDs
-        const notes = JSON.parse(savedNotes);
-        // Create a map to ensure unique notes by ID
-        const uniqueNotesMap = new Map();
-        
-        // Filter for valid notes with proper coordinates
-        notes.forEach(note => {
-          if (note.id && isValidCoordinate(note.latitude, note.longitude)) {
-            uniqueNotesMap.set(note.id, note);
-          } else {
-            console.warn('Found invalid note in storage:', note);
-          }
-        });
-        
-        setVoiceNotes(Array.from(uniqueNotesMap.values()));
-      }
-    } catch (error) {
-      console.error('Failed to load voice notes:', error);
-    }
-  };
-
-  const fetchAudioFiles = async () => {
-    try {
-      // Get the access token from secure storage
-      const API_TOKEN = await AsyncStorage.getItem('accessToken');
-      
-      if (!API_TOKEN) {
-        throw new Error('No access token found');
-      }
-      console.log("accesstoken:", API_TOKEN);
+// New function specifically for refresh operations
+const fetchAudioFilesRefresh = async () => {
+  try {
+    // Get the access token from secure storage
+    const API_TOKEN = await AsyncStorage.getItem('accessToken');
     
-      const response = await fetch(`${API_URL}/audio/user/files`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${API_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch audio files');
+    if (!API_TOKEN) {
+      throw new Error('No access token found');
+    }
+  
+    const response = await fetch(`${API_URL}/audio/user/files`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${API_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch audio files');
+    }
+    
+    const data = await response.json();
+    
+    // Process the audio files
+    const now = new Date();
+    const availableNotes: VoiceNote[] = [];
+    const hiddenNotesList: VoiceNote[] = [];
+    
+    data.audio_files.forEach((file: AudioFile) => {
+      // Skip if file has no ID
+      if (!file._id) {
+        console.warn('Audio file missing ID:', file);
+        return;
       }
       
-      const data = await response.json();
+      // Extract coordinates from potentially different formats
+      const coords = extractCoordinates(file.location);
       
-      // Process the audio files
-      const now = new Date();
+      if (!coords) {
+        console.warn('Invalid audio file data:', file);
+        return;
+      }
       
-      // Use maps to ensure unique entries by ID
-      const availableMap = new Map();
-      const hiddenMap = new Map();
+      // Validate extracted coordinates
+      if (!isValidCoordinate(coords.latitude, coords.longitude)) {
+        console.warn('Invalid coordinates in audio file:', file);
+        return;
+      }
       
-      data.audio_files.forEach((file: AudioFile) => {
-        // Skip if file has no ID
-        if (!file._id) {
-          console.warn('Audio file missing ID:', file);
-          return;
-        }
-        
-        // Extract coordinates from potentially different formats
-        const coords = extractCoordinates(file.location);
-        
-        if (!coords) {
-          console.warn('Invalid audio file data:', file);
-          return;
-        }
-        
-        // Validate extracted coordinates
-        if (!isValidCoordinate(coords.latitude, coords.longitude)) {
-          console.warn('Invalid coordinates in audio file:', file);
-          return;
-        }
-        
-        const hiddenUntil = new Date(file.hidden_until);
-        const isAvailable = now >= hiddenUntil;
-        
-        const note: VoiceNote = {
-          id: file._id,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          title: file.file_name,
-          audioUrl: `${API_URL}/audio/files/${file._id}/download`,  // Updated URL to match new endpoint
-          isDiscovered: false,
-          hiddenUntil: file.hidden_until,
-          range: file.range
-        };
-        
-        if (isAvailable) {
-          availableMap.set(file._id, note);
-        } else {
-          hiddenMap.set(file._id, note);
-        }
-      });
+      const hiddenUntil = new Date(file.hidden_until);
+      const isAvailable = now >= hiddenUntil;
       
-      // Log the fetched data for debugging
-      console.log(`Fetched ${data.audio_files.length} files, ${availableMap.size} unique available, ${hiddenMap.size} unique hidden`);
+      const note: VoiceNote = {
+        id: file._id,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        title: file.file_name,
+        audioUrl: `${API_URL}/audio/files/${file._id}/download`,
+        isDiscovered: false, // Reset discovery status on refresh
+        hiddenUntil: file.hidden_until,
+        range: file.range
+      };
       
-      // Update state with available notes, ensuring no duplicates
-      setVoiceNotes(prev => {
-        // Create a map with existing notes
-        const notesMap = new Map(prev.map(note => [note.id, note]));
-        
-        // Add new available notes, overwriting existing ones if needed
-        availableMap.forEach((note, id) => {
-          notesMap.set(id, note);
-        });
-        
-        return Array.from(notesMap.values());
-      });
-      
-      // Set hidden notes
-      setHiddenNotes(Array.from(hiddenMap.values()));
-      
-      // Save the updated notes to AsyncStorage
-      const updatedNotes = [...Array.from(availableMap.values())];
-      await AsyncStorage.setItem('savedNotes', JSON.stringify(updatedNotes));
-      
-    } catch (error) {
-      console.error('Error fetching audio files:', error);
-    }
-  };
+      if (isAvailable) {
+        availableNotes.push(note);
+      } else {
+        hiddenNotesList.push(note);
+      }
+    });
+    
+    console.log(`Refreshed data: ${data.audio_files.length} files, ${availableNotes.length} available, ${hiddenNotesList.length} hidden`);
+    
+    // Update state with ONLY the newly fetched notes
+    setVoiceNotes(availableNotes);
+    setHiddenNotes(hiddenNotesList);
+    
+    // Save the updated notes to AsyncStorage (replacing previous data)
+    await AsyncStorage.setItem('savedNotes', JSON.stringify(availableNotes));
+    
+  } catch (error) {
+    console.error('Error refreshing audio files:', error);
+    // Show error to user
+    Alert.alert('Refresh Failed', 'Unable to refresh audio files. Please try again.');
+  }
+};
 
   // New function to group nearby markers
   const updateGroupedMarkers = () => {
@@ -385,7 +351,7 @@ export default function MapScreen() {
     return R * c;
   };
 
-  const playAudio = async (audioSource) => {
+  const playAudio = async (audioSource: string) => {
     try {
       // Unload any previously playing audio
       if (soundRef.current) {
@@ -534,7 +500,7 @@ export default function MapScreen() {
           handleSingleNoteSelection(item);
           setShowNotesList(false);
         }}
-        disabled={isLocked}
+        disabled={isLocked ? true : false} // Fixed the error here
       >
         <View style={styles.noteListItemContent}>
           <View>

@@ -20,7 +20,7 @@ export const uploadAudioFile = async ({
   longitude, 
   title = 'Untitled Note',
   range = 1000, // Default range in meters
-  hiddenUntil = new Date(Date.now() + 24 * 60 * 60 * 1000) // Default: hidden for 24 hours
+  hiddenUntil = new Date(Date.now()) // Default: hidden for 24 hours
 }: AudioUploadParams) => {
   try {
     // Get the access token from secure storage
@@ -44,6 +44,7 @@ export const uploadAudioFile = async ({
     } as any);
 
     // Add additional form fields
+    formData.append('title', title);
     formData.append('latitude', latitude.toString());
     formData.append('longitude', longitude.toString());
     formData.append('range', range.toString());

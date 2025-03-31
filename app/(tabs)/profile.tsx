@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Modal } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Modal, Alert, RefreshControl } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Bell, MapPin, User, X, Mic } from 'lucide-react-native';
+import { Bell, MapPin, User, X, Mic, Trash2 } from 'lucide-react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 interface UserProfile {
   username: string;
@@ -14,9 +15,9 @@ interface UserProfile {
 interface VoiceNote {
   _id: string;
   user_id: string;
+  title?: string; // Added optional title field
   file_name: string;
   location?: {
-    // Update the location interface to match what's coming from the API
     coordinates?: [number, number]; // [longitude, latitude]
   };
   hidden_until?: string;
@@ -31,22 +32,28 @@ export default function ProfileScreen() {
   const [voiceNotes, setVoiceNotes] = useState<VoiceNote[]>([]);
   const [selectedNote, setSelectedNote] = useState<VoiceNote | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    // Load both profile and voice notes
-    async function loadData() {
-      try {
-        await loadProfile();
-        await fetchVoiceNotes();
-        setLoading(false);
-      } catch (err) {
-        setError((err as Error).message || 'An error occurred');
-        setLoading(false);
-      }
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      await loadProfile();
+      await fetchVoiceNotes();
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message || 'An error occurred');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-    
-    loadData();
   }, []);
+
+
+  // Initial data load
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // Update profile when voice notes change
   useEffect(() => {
@@ -57,6 +64,11 @@ export default function ProfileScreen() {
       }));
     }
   }, [voiceNotes]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadData();
+  }, [loadData]);
 
   const getTimeSinceJoining = (createdAt: string) => {
     const createdDate = new Date(createdAt);
@@ -142,6 +154,61 @@ export default function ProfileScreen() {
     }
   };
 
+  const deleteVoiceNote = async (audioId: string) => {
+    try {
+      setIsDeleting(true);
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch(`https://echo-trails-backend.vercel.app/audio/files/${audioId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete voice note');
+      }
+
+      // Remove the deleted note from state
+      setVoiceNotes(prevNotes => prevNotes.filter(note => note._id !== audioId));
+      
+      // Close the modal after successful deletion
+      closeModal();
+      
+      // Show success message
+      Alert.alert('Success', 'Voice note deleted successfully');
+      
+      return true;
+    } catch (err) {
+      console.error('Error deleting voice note:', err);
+      Alert.alert('Error', (err as Error).message || 'Failed to delete voice note');
+      return false;
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const confirmDelete = () => {
+    if (!selectedNote) return;
+    
+    Alert.alert(
+      'Delete Voice Note',
+      `Are you sure you want to delete "${selectedNote.title || selectedNote.file_name}"? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive', 
+          onPress: () => deleteVoiceNote(selectedNote._id)
+        }
+      ]
+    );
+  };
+
   const openNoteDetails = (note: VoiceNote) => {
     console.log("Opening note details:", note._id);
     // Safely log location data
@@ -165,24 +232,37 @@ export default function ProfileScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading...</Text>
-      </View>
-    );
-  }
+  const renderLoadingView = () => (
+    <View style={styles.loadingContainer}>
+      <Text style={styles.loadingText}>Loading...</Text>
+    </View>
+  );
 
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>{error}</Text>
-      </View>
-    );
+  if (loading && !refreshing) {
+    return renderLoadingView();
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          colors={['#00ff9d']}
+          tintColor="#00ff9d"
+        />
+      }
+    >
+      {error && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={loadData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.header}>
         <Image style={styles.coverImage} />
         <View style={styles.profileImageContainer}>
@@ -235,6 +315,8 @@ export default function ProfileScreen() {
                   <View style={styles.noteIconContainer}>
                     <Mic size={24} color="#00ff9d" />
                   </View>
+                  {/* Display title if available, otherwise fallback to file_name */}
+                  <Text style={styles.noteCardTitle} numberOfLines={1}>{note.title || 'Untitled'}</Text>
                   <Text style={styles.noteCardName} numberOfLines={1}>{note.file_name}</Text>
                   <Text style={styles.noteCardDate}>{new Date(note.created_at).toLocaleDateString()}</Text>
                 </TouchableOpacity>
@@ -261,6 +343,12 @@ export default function ProfileScreen() {
             
             {selectedNote && (
               <View style={styles.noteDetails}>
+                {/* Added title to the modal details */}
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Title:</Text>
+                  <Text style={styles.detailValue}>{selectedNote.title || 'Untitled'}</Text>
+                </View>
+                
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>File Name:</Text>
                   <Text style={styles.detailValue}>{selectedNote.file_name}</Text>
@@ -280,7 +368,6 @@ export default function ProfileScreen() {
                   <Text style={styles.detailLabel}>Location:</Text>
                   <Text style={styles.detailValue}>
                     {selectedNote.location?.coordinates ? 
-                      // Access coordinates safely with optional chaining and correct indexes
                       `${selectedNote.location.coordinates[1].toFixed(4)}, ${selectedNote.location.coordinates[0].toFixed(4)}`
                       : 'Location not available'
                     }
@@ -298,6 +385,17 @@ export default function ProfileScreen() {
                   <Text style={styles.detailLabel}>Note ID:</Text>
                   <Text style={styles.detailValue}>{selectedNote._id}</Text>
                 </View>
+
+                <TouchableOpacity 
+                  style={styles.deleteButton} 
+                  onPress={confirmDelete}
+                  disabled={isDeleting}
+                >
+                  <Trash2 size={20} color="#fff" />
+                  <Text style={styles.deleteButtonText}>
+                    {isDeleting ? 'Deleting...' : 'Delete Voice Note'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -307,12 +405,34 @@ export default function ProfileScreen() {
   );
 }
 
-
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1a1a1a',
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    padding: 20,
+    backgroundColor: 'rgba(255, 77, 77, 0.2)',
+    borderRadius: 8,
+    margin: 10,
+    alignItems: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#00ff9d',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 6,
+    marginTop: 10,
+  },
+  retryButtonText: {
+    color: '#1a1a1a',
+    fontWeight: 'bold',
   },
   header: {
     height: 200,
@@ -386,7 +506,7 @@ const styles = StyleSheet.create({
     color: '#ff4d4d',
     fontSize: 16,
     textAlign: 'center',
-    marginTop: 20,
+    marginBottom: 10,
   },
   recentNotesSection: {
     marginTop: 25,
@@ -401,6 +521,17 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  refreshButton: {
+    backgroundColor: '#00ff9d',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  refreshButtonText: {
+    color: '#1a1a1a',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   emptyText: {
     color: '#888',
@@ -431,10 +562,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  // Added new style for title
+  noteCardTitle: {
+    color: '#00ff9d',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
   noteCardName: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: 'normal', // Changed from bold to normal since title is now bold
     textAlign: 'center',
     marginBottom: 4,
   },
@@ -493,5 +632,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     width: '65%',
+  },
+  deleteButton: {
+    backgroundColor: '#ff4d4d',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 });
