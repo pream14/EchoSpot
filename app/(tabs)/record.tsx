@@ -7,6 +7,8 @@ import {
   TextInput,
   Alert,
   Platform,
+  KeyboardAvoidingView,
+  ScrollView,
 } from "react-native";
 import { Audio } from "expo-av";
 import * as Location from "expo-location";
@@ -328,178 +330,190 @@ export default function RecordScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      {location && (
-        <MapView
-          style={styles.map}
-          initialRegion={{
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          }}
-          onPress={handleMapPress}
-        >
-          <Marker coordinate={location.coords}>
-            <View style={styles.marker}>
-              <MapPin size={20} color="#fff" />
-            </View>
-          </Marker>
-
-          {customLocation && (
-            <Marker coordinate={customLocation}>
-              <View style={[styles.marker, styles.customMarker]}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
+        {location && (
+          <MapView
+            style={styles.map}
+            initialRegion={{
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            }}
+            onPress={handleMapPress}
+          >
+            <Marker coordinate={location.coords}>
+              <View style={styles.marker}>
                 <MapPin size={20} color="#fff" />
               </View>
             </Marker>
-          )}
-        </MapView>
-      )}
 
-      <View style={styles.controls}>
-        {/* Title Input Field */}
-        <TextInput
-          style={styles.input}
-          placeholder="Enter a title for your voice note"
-          placeholderTextColor="#888"
-          value={title}
-          onChangeText={setTitle}
-          editable={!isUploading}
-        />
-
-        {isRecording && (
-          <Text style={styles.durationText}>
-            Recording: {formatDuration(duration)}
-          </Text>
+            {customLocation && (
+              <Marker coordinate={customLocation}>
+                <View style={[styles.marker, styles.customMarker]}>
+                  <MapPin size={20} color="#fff" />
+                </View>
+              </Marker>
+            )}
+          </MapView>
         )}
 
-        {/* Range Selector */}
-        <View style={styles.rangeContainer}>
-          <Text style={styles.rangeLabel}>Range: {range} meters</Text>
-          <View style={styles.rangeInputContainer}>
-            <Text style={styles.rangeValue}>100m</Text>
-            <TextInput
-              style={styles.rangeInput}
-              value={String(range)}
-              onChangeText={(text) => {
-                // Allow empty text when backspacing
-                if (text === '') {
-                  setRange(0);
-                  return;
-                }
-                
-                // Only process numeric input
-                if (/^\d+$/.test(text)) {
-                  const value = parseInt(text);
-                  setRange(value);
-                }
-              }}
-              onBlur={() => {
-                // Validate the range only when user finishes editing
-                if (range < 100) {
-                  setRange(100);
-                } else if (range > 5000) {
-                  setRange(5000);
-                }
-              }}
-              keyboardType="numeric"
-              maxLength={4}
-              placeholderTextColor="#888"
-              placeholder="1000"
-              editable={!isUploading}
-            />
-            <Text style={styles.rangeValue}>5000m</Text>
-          </View>
-        </View>
-        {/* Date Time Selector */}
-        <TouchableOpacity 
-          style={styles.datePickerButton} 
-          onPress={showDatePickerModal}
-          disabled={isUploading}
-        >
-          <Calendar size={24} color="#fff" />
-          <Text style={styles.dateText}>
-            Hidden Until: {formatDate(hiddenUntil)}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Only show the date picker when showDatePicker is true */}
-        {showDatePicker && (
-          <DateTimePicker
-            testID="dateTimePicker"
-            value={hiddenUntil}
-            mode={Platform.OS === 'ios' ? 'datetime' : datePickerMode}
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            onChange={onChangeDatePicker}
-            minimumDate={new Date()}
-            is24Hour={false}
+        <View style={styles.controls}>
+          {/* Title Input Field */}
+          <TextInput
+            style={styles.input}
+            placeholder="Enter a title for your voice note"
+            placeholderTextColor="#888"
+            value={title}
+            onChangeText={setTitle}
+            editable={!isUploading}
           />
-        )}
 
-        <TouchableOpacity 
-          style={styles.uploadButton} 
-          onPress={pickAudioFile}
-          disabled={isUploading}
-        >
-          <Upload size={24} color="#fff" />
-          <Text style={styles.uploadText}>Upload</Text>
-        </TouchableOpacity>
-
-        <View style={styles.buttonRow}>
-          {isRecording ? (
-            <TouchableOpacity 
-              style={[styles.recordButton, styles.recording]} 
-              onPress={stopRecording}
-              disabled={isUploading}
-            >
-              <Square size={32} color="#fff" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              style={styles.recordButton} 
-              onPress={startRecording}
-              disabled={isUploading}
-            >
-              <Mic size={32} color="#fff" />
-            </TouchableOpacity>
+          {isRecording && (
+            <Text style={styles.durationText}>
+              Recording: {formatDuration(duration)}
+            </Text>
           )}
 
-          {recordingUri && (
-            <>
+          {/* Range Selector */}
+          <View style={styles.rangeContainer}>
+            <Text style={styles.rangeLabel}>Range: {range} meters</Text>
+            <View style={styles.rangeInputContainer}>
+              <Text style={styles.rangeValue}>100m</Text>
+              <TextInput
+                style={styles.rangeInput}
+                value={String(range)}
+                onChangeText={(text) => {
+                  // Allow empty text when backspacing
+                  if (text === '') {
+                    setRange(0);
+                    return;
+                  }
+                  
+                  // Only process numeric input
+                  if (/^\d+$/.test(text)) {
+                    const value = parseInt(text);
+                    setRange(value);
+                  }
+                }}
+                onBlur={() => {
+                  // Validate the range only when user finishes editing
+                  if (range < 100) {
+                    setRange(100);
+                  } else if (range > 5000) {
+                    setRange(5000);
+                  }
+                }}
+                keyboardType="numeric"
+                maxLength={4}
+                placeholderTextColor="#888"
+                placeholder="1000"
+                editable={!isUploading}
+              />
+              <Text style={styles.rangeValue}>5000m</Text>
+            </View>
+          </View>
+          {/* Date Time Selector */}
+          <TouchableOpacity 
+            style={styles.datePickerButton} 
+            onPress={showDatePickerModal}
+            disabled={isUploading}
+          >
+            <Calendar size={24} color="#fff" />
+            <Text style={styles.dateText}>
+              Hidden Until: {formatDate(hiddenUntil)}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Only show the date picker when showDatePicker is true */}
+          {showDatePicker && (
+            <DateTimePicker
+              testID="dateTimePicker"
+              value={hiddenUntil}
+              mode={Platform.OS === 'ios' ? 'datetime' : datePickerMode}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={onChangeDatePicker}
+              minimumDate={new Date()}
+              is24Hour={false}
+            />
+          )}
+
+          <TouchableOpacity 
+            style={styles.uploadButton} 
+            onPress={pickAudioFile}
+            disabled={isUploading}
+          >
+            <Upload size={24} color="#fff" />
+            <Text style={styles.uploadText}>Upload</Text>
+          </TouchableOpacity>
+
+          <View style={styles.buttonRow}>
+            {isRecording ? (
               <TouchableOpacity 
-                style={styles.controlButton} 
-                onPress={() => playRecording(recordingUri)}
+                style={[styles.recordButton, styles.recording]} 
+                onPress={stopRecording}
                 disabled={isUploading}
               >
-                <Play size={24} color="#00ff9d" />
+                <Square size={32} color="#fff" />
               </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                style={styles.recordButton} 
+                onPress={startRecording}
+                disabled={isUploading}
+              >
+                <Mic size={32} color="#fff" />
+              </TouchableOpacity>
+            )}
 
-              {isPlaying && (
+            {recordingUri && (
+              <>
                 <TouchableOpacity 
                   style={styles.controlButton} 
-                  onPress={stopPlayback}
+                  onPress={() => playRecording(recordingUri)}
                   disabled={isUploading}
                 >
-                  <StopCircle size={24} color="#ff4d4d" />
+                  <Play size={24} color="#00ff9d" />
                 </TouchableOpacity>
-              )}
 
-              <TouchableOpacity 
-                style={styles.controlButton} 
-                onPress={saveVoiceNote}
-                disabled={isUploading}
-              >
-                <Save size={24} color={isUploading ? "#666" : "#00ff9d"} />
-              </TouchableOpacity>
-            </>
+                {isPlaying && (
+                  <TouchableOpacity 
+                    style={styles.controlButton} 
+                    onPress={stopPlayback}
+                    disabled={isUploading}
+                  >
+                    <StopCircle size={24} color="#ff4d4d" />
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity 
+                  style={styles.controlButton} 
+                  onPress={saveVoiceNote}
+                  disabled={isUploading}
+                >
+                  <Save size={24} color={isUploading ? "#666" : "#00ff9d"} />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+
+          {isUploading && (
+            <Text style={styles.uploadingText}>Uploading...</Text>
           )}
+          
+          {/* Add extra space at the bottom to ensure everything is accessible */}
+          <View style={styles.bottomSpacer} />
         </View>
-
-        {isUploading && (
-          <Text style={styles.uploadingText}>Uploading...</Text>
-        )}
-      </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -508,9 +522,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#1a1a1a',
   },
+  scrollContainer: {
+    flexGrow: 1,
+  },
   map: {
     width: '100%',
-    height: '50%',
+    height: 400, // Fixed height instead of percentage for better layout control
   },
   marker: {
     backgroundColor: '#ff4d4d',
@@ -559,9 +576,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   controls: {
-    flex: 1,
     padding: 20,
-    justifyContent: 'space-between',
   },
   loadingText: {
     color: '#fff',
@@ -598,7 +613,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 20,
-    marginBottom: 20,
+    marginVertical: 20,
   },
   recordButton: {
     width: 80,
@@ -675,5 +690,8 @@ const styles = StyleSheet.create({
   rangeValue: {
     color: '#999',
     fontSize: 14,
+  },
+  bottomSpacer: {
+    height: Platform.OS === 'ios' ? 50 : 20, // Extra padding at bottom
   },
 });
