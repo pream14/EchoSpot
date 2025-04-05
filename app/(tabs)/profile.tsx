@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Modal, Alert, RefreshControl } from 'react-native';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Modal, Alert, RefreshControl, FlatList, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Bell, MapPin, User, X, Mic, Trash2 } from 'lucide-react-native';
+import { Bell, MapPin, User,Calendar, X, Mic, Trash2, UserPlus, UserCheck, UserX, Users, Search } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 interface UserProfile {
@@ -10,19 +10,31 @@ interface UserProfile {
   notesCount: number;
   joinedDate: string;
   timeSinceJoining?: { value: number; label: string };
+  followingCount?: number;
 }
 
 interface VoiceNote {
   _id: string;
   user_id: string;
-  title?: string; // Added optional title field
+  username: string;
+  title?: string;
   file_name: string;
   location?: {
-    coordinates?: [number, number]; // [longitude, latitude]
+    coordinates?: [number, number];
   };
   hidden_until?: string;
   created_at: string;
   audio_data?: number;
+}
+
+interface FollowUser {
+  id: string;
+  username: string;
+}
+
+interface FollowRequest {
+  id: string;
+  username: string;
 }
 
 export default function ProfileScreen() {
@@ -34,12 +46,30 @@ export default function ProfileScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Add to your existing state variables
+  const [allUsers, setAllUsers] = useState<{id: string, username: string}[]>([]);
+  const [searchResults, setSearchResults] = useState<{id: string, username: string}[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  // Social feature states
+  const [following, setFollowing] = useState<FollowUser[]>([]);
+  const [followers, setFollowers] = useState<FollowUser[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<FollowRequest[]>([]);
+  const [socialModalVisible, setSocialModalVisible] = useState(false);
+  const [socialModalType, setSocialModalType] = useState<'following' | 'followers' | 'requests' | 'search'>('following');
+  
+  // Search functionality states
+  const [usernameInput, setUsernameInput] = useState('');
+  const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const [requestSuccess, setRequestSuccess] = useState<string | null>(null);
+  const usernameInputRef = useRef<TextInput>(null);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       await loadProfile();
       await fetchVoiceNotes();
+      await fetchFollowing();
+      await fetchPendingRequests();
       setError(null);
     } catch (err) {
       setError((err as Error).message || 'An error occurred');
@@ -48,7 +78,6 @@ export default function ProfileScreen() {
       setRefreshing(false);
     }
   }, []);
-
 
   // Initial data load
   useEffect(() => {
@@ -64,6 +93,17 @@ export default function ProfileScreen() {
       }));
     }
   }, [voiceNotes]);
+
+  // Clear success message after a timeout
+  useEffect(() => {
+    if (requestSuccess) {
+      const timer = setTimeout(() => {
+        setRequestSuccess(null);
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [requestSuccess]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -113,7 +153,8 @@ export default function ProfileScreen() {
         email: data.user_data.email,
         notesCount: 0, // This will be updated after fetching voice notes
         joinedDate: new Date(data.user_data.created_at).toDateString(),
-        timeSinceJoining
+        timeSinceJoining,
+        followingCount: 0  // Will be updated after fetching following
       };
 
       setProfile(userProfile);
@@ -124,6 +165,37 @@ export default function ProfileScreen() {
       throw new Error(errorMessage);
     }
   };
+  const fetchAllUsers = async () => {
+    try {
+      setIsSearching(true);
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+  
+      const response = await fetch('https://echo-trails-backend.vercel.app/users/all', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+  
+      if (!response.ok) throw new Error('Failed to fetch users');
+  
+      const data = await response.json();
+      setAllUsers(data || []);
+      
+      // Initialize search results with all users
+      setSearchResults(data || []);
+      return data;
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      Alert.alert('Error', (err as Error).message || 'Failed to fetch users');
+      return [];
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
 
   const fetchVoiceNotes = async () => {
     try {
@@ -154,6 +226,273 @@ export default function ProfileScreen() {
     }
   };
 
+  // Social features implementation
+  const fetchFollowing = async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+  
+      const response = await fetch('https://echo-trails-backend.vercel.app/users/following', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+  
+      if (!response.ok) throw new Error('Failed to fetch following users');
+  
+      const data = await response.json();
+      setFollowing(data || []);
+      
+      // Add this line to update the followingCount in profile
+      setProfile(prevProfile => ({
+        ...prevProfile!,
+        followingCount: data?.length || 0
+      }));
+      
+      return data;
+    } catch (err) {
+      console.error('Error fetching following users:', err);
+      throw err;
+    }
+  };
+  const fetchPendingRequests = async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch('https://echo-trails-backend.vercel.app/users/follow/requests/pending', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch pending requests');
+
+      const data = await response.json();
+      setPendingRequests(data || []);
+      return data;
+    } catch (err) {
+      console.error('Error fetching pending requests:', err);
+      throw err;
+    }
+  };
+
+  const sendFollowRequest = async (username: string) => {
+    if (!username.trim()) {
+      Alert.alert('Error', 'Please enter a username');
+      return false;
+    }
+    
+    try {
+      setIsSendingRequest(true);
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch(`https://echo-trails-backend.vercel.app/users/follow/request/${username}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to send follow request');
+      }
+      console.log(response)
+      // Show success message
+      setRequestSuccess(`Follow request sent to ${username}`);
+      
+      // Clear input field
+      setUsernameInput('');
+      
+      return true;
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message || 'Failed to send follow request');
+      return false;
+    } finally {
+      setIsSendingRequest(false);
+    }
+  };
+
+  const acceptFollowRequest = async (requesterId: string) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch(`https://echo-trails-backend.vercel.app/users/follow/accept/${requesterId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to accept follow request');
+      }
+      console.log("success accept",response.json())
+      // Remove from pending requests and refresh followers
+      setPendingRequests(prevRequests => prevRequests.filter(req => req.id !== requesterId));
+      
+      Alert.alert('Success', 'Follow request accepted');
+      return true;
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message || 'Failed to accept follow request');
+      return false;
+    }
+  };
+
+  const rejectFollowRequest = async (requesterId: string) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch(`https://echo-trails-backend.vercel.app/users/follow/reject/${requesterId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to reject follow request');
+      }
+      console.log("reject",response.json())
+      // Remove from pending requests
+      setPendingRequests(prevRequests => prevRequests.filter(req => req.id !== requesterId));
+      
+      Alert.alert('Success', 'Follow request rejected');
+      return true;
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message || 'Failed to reject follow request');
+      return false;
+    }
+  };
+
+  const unfollowUser = async (username: string) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+  
+      const response = await fetch(`https://echo-trails-backend.vercel.app/users/unfollow/${username}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+  
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to unfollow user');
+      }
+  
+      // Remove from following list
+      setFollowing(prevFollowing => {
+        const newFollowing = prevFollowing.filter(user => user.username !== username);
+        
+        // Update profile followingCount as well
+        setProfile(prevProfile => ({
+          ...prevProfile!,
+          followingCount: newFollowing.length
+        }));
+        
+        return newFollowing;
+      });
+      
+      Alert.alert('Success', `Successfully unfollowed ${username}`);
+      return true;
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message || 'Failed to unfollow user');
+      return false;
+    }
+  };
+
+  const removeFollower = async (username: string) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch(`https://echo-trails-backend.vercel.app/followers/remove/${username}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to remove follower');
+      }
+
+      // Remove from followers list
+      setFollowers(prevFollowers => prevFollowers.filter(user => user.username !== username));
+      
+      Alert.alert('Success', `Successfully removed ${username} from your followers`);
+      return true;
+    } catch (err) {
+      Alert.alert('Error', (err as Error).message || 'Failed to remove follower');
+      return false;
+    }
+  };
+
+  const openSocialModal = (type: 'following' | 'followers' | 'requests' | 'search') => {
+  setSocialModalType(type);
+  setSocialModalVisible(true);
+  
+  // Fetch all users when opening search modal
+  if (type === 'search') {
+    fetchAllUsers();
+    setTimeout(() => {
+      usernameInputRef.current?.focus();
+    }, 300);
+  }
+};
+
+  const closeSocialModal = () => {
+    setSocialModalVisible(false);
+    // Clear search state when closing modal
+    if (socialModalType === 'search') {
+      setUsernameInput('');
+      setRequestSuccess(null);
+    }
+  };
+
+  // Handle submission of username for follow request
+  const handleSendRequest = () => {
+    if (usernameInput.trim()) {
+      sendFollowRequest(usernameInput.trim());
+    } else {
+      Alert.alert('Error', 'Please enter a username');
+    }
+  };
+  const searchUsers = (text: string) => {
+    setUsernameInput(text);
+    
+    if (!text.trim()) {
+      // If search text is empty, show all users
+      setSearchResults(allUsers);
+      return;
+    }
+    
+    // Filter users whose username contains the search text
+    const filtered = allUsers.filter(user => 
+      user.username.toLowerCase().includes(text.toLowerCase())
+    );
+    setSearchResults(filtered);
+  };
+
+  // Existing voice note functions
   const deleteVoiceNote = async (audioId: string) => {
     try {
       setIsDeleting(true);
@@ -214,6 +553,7 @@ export default function ProfileScreen() {
     // Safely log location data
     console.log("Location data:", note.location?.coordinates);
     setSelectedNote(note);
+    console.log("Selected note:", note);
     setModalVisible(true);
   };
 
@@ -264,9 +604,7 @@ export default function ProfileScreen() {
       )}
 
       <View style={styles.header}>
-        <Image style={styles.coverImage} />
-        <View style={styles.profileImageContainer}>
-        </View>
+
       </View>
 
       <View style={styles.content}>
@@ -283,18 +621,50 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>Voice Notes</Text>
           </TouchableOpacity>
           
-          <View style={styles.statItem}>
-            <Bell size={24} color="#00ff9d" />
-            <Text style={styles.statNumber}>12</Text>
-            <Text style={styles.statLabel}>Notifications</Text>
-          </View>
+          <TouchableOpacity 
+            style={styles.statItem}
+            onPress={() => openSocialModal('following')}
+          >
+            <UserCheck size={24} color="#00ff9d" />
+            <Text style={styles.statNumber}>{profile?.followingCount || 0}</Text>
+            <Text style={styles.statLabel}>Following</Text>
+          </TouchableOpacity>
           
-          <View style={styles.statItem}>
-            <User size={24} color="#00ff9d" />
-            <Text style={styles.statNumber}>{profile?.timeSinceJoining?.value}</Text>
-            <Text style={styles.statLabel}>{profile?.timeSinceJoining?.label}</Text>
-          </View>
+          <TouchableOpacity 
+            style={styles.statItem}
+            onPress={() => Alert.alert('Activity Streak', `You've been active for ${profile?.timeSinceJoining?.value || 0} ${profile?.timeSinceJoining?.label || 'Days'}!`)}
+          >
+            <Calendar size={24} color="#00ff9d" />
+            <Text style={styles.statNumber}>{profile?.timeSinceJoining?.value || 0}</Text>
+            <Text style={styles.statLabel}>Days Active</Text>
+            </TouchableOpacity>
         </View>
+
+        {/* Find Users button */}
+        <TouchableOpacity 
+          style={styles.findUsersButton}
+          onPress={() => openSocialModal('search')}
+        >
+          <View style={styles.findUsersButtonContent}>
+            <Search size={20} color="#00ff9d" />
+            <Text style={styles.findUsersButtonText}>Find Users</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Pending follow requests section */}
+        {pendingRequests.length > 0 && (
+          <TouchableOpacity 
+            style={styles.requestsButton}
+            onPress={() => openSocialModal('requests')}
+          >
+            <View style={styles.requestsButtonContent}>
+              <UserPlus size={20} color="#00ff9d" />
+              <Text style={styles.requestsButtonText}>
+                {pendingRequests.length} Pending Follow {pendingRequests.length === 1 ? 'Request' : 'Requests'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Recent Voice Notes section - placed near notifications */}
         <View style={styles.recentNotesSection}>
@@ -326,6 +696,7 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* Voice Note Modal - Keep existing modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -348,7 +719,10 @@ export default function ProfileScreen() {
                   <Text style={styles.detailLabel}>Title:</Text>
                   <Text style={styles.detailValue}>{selectedNote.title || 'Untitled'}</Text>
                 </View>
-                
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>By:</Text>
+                  <Text style={styles.detailValue}>{selectedNote.username}</Text>
+                </View>                
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>File Name:</Text>
                   <Text style={styles.detailValue}>{selectedNote.file_name}</Text>
@@ -401,9 +775,169 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Social Modal - Updated for direct follow request */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={socialModalVisible}
+        onRequestClose={closeSocialModal}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {socialModalType === 'following' ? 'Following' : 
+                 socialModalType === 'followers' ? 'Followers' : 
+                 socialModalType === 'requests' ? 'Pending Follow Requests' :
+                 'Send Follow Request'}
+              </Text>
+              <TouchableOpacity onPress={closeSocialModal} style={styles.closeButton}>
+                <X size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Direct follow request form - replaces search */}
+{socialModalType === 'search' && (
+  <View style={styles.followRequestContainer}>
+    <Text style={styles.followRequestLabel}>Search users to follow:</Text>
+    <View style={styles.usernameInputContainer}>
+      <TextInput
+        ref={usernameInputRef}
+        style={styles.usernameInput}
+        placeholder="Search by username"
+        placeholderTextColor="#777"
+        value={usernameInput}
+        onChangeText={searchUsers}
+        returnKeyType="search"
+        autoCapitalize="none"
+      />
+      {isSearching && (
+        <View style={styles.searchingIndicator}>
+          <Text style={styles.searchingText}>Loading...</Text>
+        </View>
+      )}
+    </View>
+    
+    {requestSuccess && (
+      <View style={styles.successContainer}>
+        <Text style={styles.successText}>{requestSuccess}</Text>
+      </View>
+    )}
+    
+    <FlatList
+  data={searchResults}
+  keyExtractor={(item) => item.id}
+  style={styles.searchResultsList} // Add this style
+  contentContainerStyle={styles.searchResultsContent} // Add this style
+  renderItem={({ item }) => (
+    <View style={styles.userItem}>
+      <View style={styles.userInfo}>
+        <View style={styles.userAvatarPlaceholder}>
+          <User size={24} color="#00ff9d" />
+        </View>
+        <Text style={styles.username} numberOfLines={1} ellipsizeMode="tail">
+          {item.username}
+        </Text>
+      </View>
+      
+      <TouchableOpacity 
+        style={styles.actionButton} 
+        onPress={() => sendFollowRequest(item.username)}
+        disabled={isSendingRequest}
+      >
+        <UserPlus size={18} color="#fff" />
+        <Text style={styles.actionButtonText}>Follow</Text>
+      </TouchableOpacity>
+    </View>
+  )}
+  ListEmptyComponent={
+    <Text style={styles.emptyText}>
+      {isSearching ? 'Searching...' : 'No users found'}
+    </Text>
+  }
+/>
+</View>
+)}
+            
+            {socialModalType !== 'search' && (
+              <FlatList
+                data={
+                  socialModalType === 'following' ? following :
+                  socialModalType === 'followers' ? followers :
+                  pendingRequests
+                }
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <View style={styles.userItem}>
+                    <View style={styles.userInfo}>
+                      <View style={styles.userAvatarPlaceholder}>
+                        <User size={24} color="#00ff9d" />
+                      </View>
+                      <Text style={styles.username}>{item.username}</Text>
+                    </View>
+                    
+                    <View style={styles.userActions}>
+                      {socialModalType === 'following' && (
+                        <TouchableOpacity 
+                          style={styles.actionButton} 
+                          onPress={() => unfollowUser(item.username)}
+                        >
+                          <UserX size={18} color="#fff" />
+                          <Text style={styles.actionButtonText}>Unfollow</Text>
+                        </TouchableOpacity>
+                      )}
+                      
+                      {socialModalType === 'followers' && (
+                        <TouchableOpacity 
+                          style={styles.actionButton} 
+                          onPress={() => removeFollower(item.username)}
+                        >
+                          <UserX size={18} color="#fff" />
+                          <Text style={styles.actionButtonText}>Remove</Text>
+                        </TouchableOpacity>
+                      )}
+                      
+                      {socialModalType === 'requests' && (
+                        <View style={styles.requestActions}>
+                          <TouchableOpacity 
+                            style={[styles.actionButton, styles.acceptButton]} 
+                            onPress={() => acceptFollowRequest(item.id)}
+                          >
+                            <UserCheck size={18} color="#fff" />
+                            <Text style={styles.actionButtonText}>Accept</Text>
+                          </TouchableOpacity>
+                          
+                          <TouchableOpacity 
+                            style={[styles.actionButton, styles.rejectButton]} 
+                            onPress={() => rejectFollowRequest(item.id)}
+                          >
+                            <UserX size={18} color="#fff" />
+                            <Text style={styles.actionButtonText}>Reject</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+                ListEmptyComponent={
+                  <Text style={styles.emptyText}>
+                    {socialModalType === 'following' ? 'Not following anyone yet' :
+                     socialModalType === 'followers' ? 'No followers yet' :
+                     'No pending follow requests'}
+                  </Text>
+                }
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
+
+// Add these new style definitions to your existing styles
+
 
 const styles = StyleSheet.create({
   container: {
@@ -437,24 +971,6 @@ const styles = StyleSheet.create({
   header: {
     height: 200,
     position: 'relative',
-  },
-  coverImage: {
-    width: '100%',
-    height: 150,
-    resizeMode: 'cover',
-  },
-  profileImageContainer: {
-    position: 'absolute',
-    bottom: -50,
-    left: '50%',
-    transform: [{ translateX: -50 }],
-  },
-  profileImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    borderWidth: 4,
-    borderColor: '#1a1a1a',
   },
   content: {
     paddingTop: 60,
@@ -532,6 +1048,14 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     fontWeight: 'bold',
     fontSize: 12,
+  },searchResultsList: {
+    width: '100%',
+    maxHeight: 300, // Limit height to ensure it stays in the modal
+    flexGrow: 0,
+  },
+  searchResultsContent: {
+    paddingBottom: 10,
+    width: '100%',
   },
   emptyText: {
     color: '#888',
@@ -562,7 +1086,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  // Added new style for title
   noteCardTitle: {
     color: '#00ff9d',
     fontSize: 16,
@@ -573,7 +1096,7 @@ const styles = StyleSheet.create({
   noteCardName: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'normal', // Changed from bold to normal since title is now bold
+    fontWeight: 'normal',
     textAlign: 'center',
     marginBottom: 4,
   },
@@ -647,4 +1170,226 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
   },
+  // Social feature styles
+  findUsersButton: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#00ff9d',
+  },
+  findUsersButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  findUsersButtonText: {
+    color: '#00ff9d',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  requestsButton: {
+    backgroundColor: 'rgba(0, 255, 157, 0.2)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 15,
+    marginBottom: 15,
+  },
+  requestsButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestsButtonText: {
+    color: '#00ff9d',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  userItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  userAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 255, 157, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  username: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  userActions: {
+    flexDirection: 'row',
+  },
+  actionButton: {
+    backgroundColor: '#444',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  actionButtonText: {
+    color: '#fff',
+    marginLeft: 4,
+    fontSize: 14,
+  },
+  requestActions: {
+    flexDirection: 'row',
+  },
+  acceptButton: {
+    backgroundColor: '#00ff9d',
+    marginRight: 8,
+  },
+  rejectButton: {
+    backgroundColor: '#ff4d4d',
+  },
+  // Search functionality styles
+  searchContainer: {
+    flexDirection: 'row',
+    marginBottom: 15,
+    alignItems: 'center',
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: '#333',
+    color: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    marginRight: 10,
+    fontSize: 16,
+  },
+  searchButton: {
+    backgroundColor: '#00ff9d',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchingIndicator: {
+  position: 'absolute',
+  right: 60,
+  top: 10,
+},
+searchingText: {
+  color: '#00ff9d',
+  fontSize: 14,
+},
+  // Missing styles that are referenced in the component
+  followRequestContainer: {
+    padding: 10,
+  },
+  followRequestLabel: {
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 15,
+  },
+  usernameInputContainer: {
+    flexDirection: 'row',
+    marginBottom: 15,
+  },
+  usernameInput: {
+    flex: 1,
+    backgroundColor: '#333',
+    color: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    marginRight: 10,
+    fontSize: 16,
+  },
+  sendRequestButton: {
+    backgroundColor: '#00ff9d',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  sendRequestButtonText: {
+    color: '#1a1a1a',
+    fontWeight: 'bold',
+    marginLeft: 5,
+  },
+  successContainer: {
+    backgroundColor: 'rgba(0, 255, 157, 0.2)',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 15,
+  },
+  successText: {
+    color: '#00ff9d',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  infoContainer: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#333',
+    borderRadius: 8,
+  },
+  infoText: {
+    color: '#aaa',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  // Additional potentially missing styles
+  avatarContainer: {
+    position: 'absolute',
+    top: -50,
+    alignSelf: 'center',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#2a2a2a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#00ff9d',
+  },
+  avatar: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+  },
+  profileStats: {
+    marginTop: 20,
+  },
+  joinedInfo: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  joinedText: {
+    color: '#888',
+    fontSize: 14,
+  },
+  durationText: {
+    color: '#00ff9d',
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginLeft: 5,
+  }
 });

@@ -26,7 +26,8 @@ export default function LoginScreen() {
       console.log(data);
       // Store access token in AsyncStorage
       await AsyncStorage.setItem("accessToken", data.access_token);
-
+      await AsyncStorage.setItem("userName", data.username);
+      console.log("user:",data.username)
       // Redirect to main app
       router.replace("/(tabs)");
     } catch (error) {

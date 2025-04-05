@@ -12,6 +12,7 @@ export interface AudioUploadParams {
   title?: string;
   range?: number;
   hiddenUntil?: Date;
+  recipient_usernames:string;
 }
 
 export const uploadAudioFile = async ({
@@ -20,7 +21,8 @@ export const uploadAudioFile = async ({
   longitude, 
   title = 'Untitled Note',
   range = 1000, // Default range in meters
-  hiddenUntil = new Date(Date.now()) // Default: hidden for 24 hours
+  hiddenUntil = new Date(Date.now()),
+  recipient_usernames, // Default: hidden for 24 hours
 }: AudioUploadParams) => {
   try {
     // Get the access token from secure storage
@@ -51,6 +53,7 @@ export const uploadAudioFile = async ({
     
     // Add hidden until date
     formData.append('hidden_until', hiddenUntil.toISOString());
+    formData.append('recipient_usernames', recipient_usernames); 
     console.log("formdata",formData)
 
     // Perform the upload

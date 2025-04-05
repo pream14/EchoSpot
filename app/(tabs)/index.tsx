@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, FlatList, Alert } from 'react-native';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
+import MapLibreGL, { MapViewRef, CameraRef } from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { MapPin, Plus, RefreshCw, Clock, ChevronRight, X } from 'lucide-react-native';
@@ -48,6 +48,9 @@ const LOCATION_THRESHOLD = 50; // meters
 const GROUP_THRESHOLD = 100; // meters for grouping nearby notes
 const OSM_TILE_URL = "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"; // OpenStreetMap tile server
 const API_URL = "https://echo-trails-backend.vercel.app"; // Replace with your actual API URL
+MapLibreGL.setAccessToken(null);
+
+// Initialize MapLibreGL if needed (remove this if already initialized elsewhere in your app)
 
 export default function MapScreen() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -60,6 +63,9 @@ export default function MapScreen() {
   const [showNotesList, setShowNotesList] = useState(false);
   const [selectedGroupNotes, setSelectedGroupNotes] = useState<VoiceNote[]>([]);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const mapRef = useRef<MapViewRef | null>(null);
+  const cameraRef = useRef<CameraRef | null>(null);
+  
   const router = useRouter();
 
   useEffect(() => {
@@ -519,110 +525,121 @@ export default function MapScreen() {
     );
   };
 
+  // Helper to render markers as components for MapLibre
+  const renderMarkers = () => {
+    const markers = [];
+    
+    // User location marker
+    if (location && isValidCoordinate(location.coords.latitude, location.coords.longitude)) {
+      markers.push(
+        <MapLibreGL.PointAnnotation
+          key="user-location"
+          id="user-location"
+          coordinate={[location.coords.longitude, location.coords.latitude]}
+        >
+          <View style={styles.blueDot} />
+        </MapLibreGL.PointAnnotation>
+      );
+    }
+    
+    // Grouped markers
+    groupedMarkers.forEach((marker) => {
+      if (!isValidCoordinate(marker.latitude, marker.longitude)) {
+        return null;
+      }
+      
+      const hasMultipleNotes = marker.notes.length > 1;
+      const allDiscovered = hasMultipleNotes && 
+        marker.notes.every(note => note.isDiscovered);
+      const someDiscovered = hasMultipleNotes && 
+        marker.notes.some(note => note.isDiscovered);
+      
+      // Marker content based on type
+      let markerContent;
+      if (!hasMultipleNotes) {
+        const note = marker.notes[0];
+        markerContent = (
+          <View style={[styles.marker, note.isDiscovered && styles.markerDiscovered]}>
+            <MapPin size={20} color={note.isDiscovered ? '#00ff9d' : '#fff'} />
+          </View>
+        );
+      } else {
+        markerContent = (
+          <View style={[
+            styles.markerGroup, 
+            allDiscovered && styles.markerGroupAllDiscovered,
+            someDiscovered && !allDiscovered && styles.markerGroupSomeDiscovered
+          ]}>
+            <Text style={styles.markerGroupText}>{marker.notes.length}</Text>
+          </View>
+        );
+      }
+      
+      markers.push(
+        <MapLibreGL.PointAnnotation
+          key={`marker-${marker.id}`}
+          id={`marker-${marker.id}`}
+          coordinate={[marker.longitude, marker.latitude]}
+          onSelected={() => handleMarkerPress(marker)}
+        >
+          {markerContent}
+        </MapLibreGL.PointAnnotation>
+      );
+    });
+    
+    // Hidden note markers
+    hiddenNotes.forEach((note, index) => {
+      if (!isValidCoordinate(note.latitude, note.longitude)) {
+        return;
+      }
+      
+      markers.push(
+        <MapLibreGL.PointAnnotation
+          key={`hidden-${note.id}-${index}`}
+          id={`hidden-${note.id}-${index}`}
+          coordinate={[note.longitude, note.latitude]}
+          onSelected={() => setSelectedNote(note)}
+        >
+          <View style={styles.markerHidden}>
+            <Clock size={20} color="#888" />
+          </View>
+        </MapLibreGL.PointAnnotation>
+      );
+    });
+    
+    return markers;
+  };
+
   return (
     <View style={styles.container}>
       {loading ? (
         <ActivityIndicator size="large" color="#00ff9d" style={styles.loading} />
       ) : location ? (
-        <MapView
+        <MapLibreGL.MapView
+          ref={mapRef}
           style={styles.map}
-          initialRegion={{
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          }}
+          mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
+          logoEnabled={false}
+          compassEnabled={false}
+          attributionEnabled={true}
+          zoomEnabled={true}
+          // maxZoomLevel={18} 
         >
-          <UrlTile urlTemplate={OSM_TILE_URL} maximumZ={19} flipY={false} />
-
-          {isValidCoordinate(location.coords.latitude, location.coords.longitude) && (
-            <Marker 
-              coordinate={{ 
-                latitude: location.coords.latitude, 
-                longitude: location.coords.longitude 
-              }} 
-              title="You are here"
-            >
-              <View style={styles.blueDot} />
-            </Marker>
-          )}
-
-          {/* Render grouped markers */}
-          {groupedMarkers.map((marker) => {
-            // Safe guard against invalid coordinates
-            if (!isValidCoordinate(marker.latitude, marker.longitude)) {
-              console.warn('Skipping marker with invalid coordinates:', marker);
-              return null;
-            }
-            
-            const hasMultipleNotes = marker.notes.length > 1;
-            const allDiscovered = hasMultipleNotes && 
-              marker.notes.every(note => note.isDiscovered);
-            const someDiscovered = hasMultipleNotes && 
-              marker.notes.some(note => note.isDiscovered);
-            
-            // For single note, use the standard display
-            if (!hasMultipleNotes) {
-              const note = marker.notes[0];
-              return (
-                <Marker
-                  key={`marker-${marker.id}`}
-                  coordinate={{
-                    latitude: marker.latitude,
-                    longitude: marker.longitude,
-                  }}
-                  onPress={() => handleMarkerPress(marker)}
-                >
-                  <View style={[styles.marker, note.isDiscovered && styles.markerDiscovered]}>
-                    <MapPin size={20} color={note.isDiscovered ? '#00ff9d' : '#fff'} />
-                  </View>
-                </Marker>
-              );
-            }
-            
-            // For multiple notes, use a special marker
-            return (
-              <Marker
-                key={`group-${marker.id}`}
-                coordinate={{
-                  latitude: marker.latitude,
-                  longitude: marker.longitude,
-                }}
-                onPress={() => handleMarkerPress(marker)}
-              >
-                <View style={[
-                  styles.markerGroup, 
-                  allDiscovered && styles.markerGroupAllDiscovered,
-                  someDiscovered && !allDiscovered && styles.markerGroupSomeDiscovered
-                ]}>
-                  <Text style={styles.markerGroupText}>{marker.notes.length}</Text>
-                </View>
-              </Marker>
-            );
-          })}
+          <MapLibreGL.Camera
+            ref={cameraRef}
+            defaultSettings={{
+              centerCoordinate: [location.coords.longitude, location.coords.latitude],
+              zoomLevel: 14
+            }}
+            followUserLocation={true}
+          />
           
-          {/* Placeholder markers for hidden notes with validation */}
-          {hiddenNotes.map((note, index) => {
-            if (!isValidCoordinate(note.latitude, note.longitude)) {
-              console.warn('Skipping hidden marker with invalid coordinates:', note);
-              return null;
-            }
-            
-            return (
-              <Marker
-                key={`hidden-${note.id}-${index}`}
-                coordinate={{
-                  latitude: note.latitude,
-                  longitude: note.longitude,
-                }}
-                onPress={() => setSelectedNote(note)}>
-                <View style={styles.markerHidden}>
-                  <Clock size={20} color="#888" />
-                </View>
-              </Marker>
-            );
-          })}
-        </MapView>
+          {/* Use user location from the MapLibreGL component */}
+          <MapLibreGL.UserLocation visible={true} />
+          
+          {/* Render all markers */}
+          {renderMarkers()}
+        </MapLibreGL.MapView>
       ) : (
         <Text style={styles.errorText}>Location permission denied or not available.</Text>
       )}

@@ -9,29 +9,48 @@ import {
   Platform,
   KeyboardAvoidingView,
   ScrollView,
+  FlatList,
+  Modal,
 } from "react-native";
 import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {Mic,Square,Play,MapPin,Save,Upload,StopCircle,Calendar} from "lucide-react-native";
-import MapView, { Marker } from "react-native-maps";
+import {
+  Mic,
+  Square,
+  Play,
+  MapPin,
+  Save,
+  Upload,
+  StopCircle,
+  Calendar,
+  Users,
+  X,
+  CheckCircle,
+} from "lucide-react-native";
+import MapLibreGL, { MapViewRef, CameraRef } from '@maplibre/maplibre-react-native';
 import * as DocumentPicker from "expo-document-picker";
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Import the upload service
 import { uploadAudioFile } from "./audioUploadService";
+import { getFollowingUsers } from "./userService"; // You'll need to create this service
 
 const MAX_DURATION = 60000; // 60 seconds
 
 type Note = {
   id: string;
-  title: string; // Add title to the Note type
+  title: string;
   latitude: number;
   longitude: number;
   range: number;
   hidden_until: Date;
 };
 
+type FollowingUser = {
+  id: string;
+  username: string;
+};
 
 export default function RecordScreen() {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
@@ -48,34 +67,65 @@ export default function RecordScreen() {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [hiddenUntil, setHiddenUntil] = useState(new Date(Date.now() )); // Default 24 hours
+  const [hiddenUntil, setHiddenUntil] = useState(new Date(Date.now()));
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState<'date' | 'time'>('date');
-  const [range, setRange] = useState(1000); // Default range in meters
+  const [range, setRange] = useState(1000);
+  
+  // New states for friend selection
+  const [followingUsers, setFollowingUsers] = useState<FollowingUser[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [showFriendsModal, setShowFriendsModal] = useState(false);
+  const [username, setUsername] = useState<string>("");
+  
   const timerRef = useRef<NodeJS.Timeout>();
+  const mapRef = useRef<MapViewRef>(null);
+  const cameraRef = useRef<CameraRef>(null);
 
   useEffect(() => {
     (async () => {
+      // Get location permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") return;
       const currentLocation = await Location.getCurrentPositionAsync({});
       setLocation(currentLocation);
+      
+      // Load current username from AsyncStorage
+      try {
+        const storedUsername = await AsyncStorage.getItem("userName");
+        if (storedUsername) {
+          setUsername(storedUsername);
+        }
+      } catch (error) {
+        console.error("Error loading username:", error);
+      }
+      
+      // Load following users
+      fetchFollowingUsers();
     })();
-
-    loadSavedNotes();
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (recording) recording.stopAndUnloadAsync();
     };
   }, []);
-
-  async function loadSavedNotes() {
-    const notes = await AsyncStorage.getItem("savedNotes");
-    if (notes) {
-      setSavedNotes(JSON.parse(notes));
+  
+  // Fetch the user's following list
+  const fetchFollowingUsers = async () => {
+    try {
+      // Get auth token from AsyncStorage
+      const token = await AsyncStorage.getItem("accessToken");
+      if (!token) {
+        console.error("No auth token found");
+        return;
+      }
+      
+      const users = await getFollowingUsers(token);
+      setFollowingUsers(users);
+    } catch (error) {
+      console.error("Failed to fetch following users:", error);
     }
-  }
+  };
 
   async function pickAudioFile() {
     try {
@@ -189,26 +239,38 @@ export default function RecordScreen() {
         setIsUploading(false);
         return;
       }
+      
+      // Create recipient list - if no friends selected, include current user
+      let recipients = selectedFriends.length > 0 ? [...selectedFriends] : [];
+      // Always include current user if they have a username
+      if (username && !recipients.includes(username)) {
+        recipients.push(username);
+      }
+      
+      // Join recipients into comma-separated string
+      const recipientString = recipients.join(',');
 
-      // Upload the audio file with the user-selected date and range
+      // Upload the audio file with all parameters
       const uploadResult = await uploadAudioFile({
         audioUri: recordingUri,
-        title: title.trim(), // Add the title to the upload parameters
+        title: title.trim(),
         latitude: noteLocation.latitude,
         longitude: noteLocation.longitude,
-        range: range, // Use the user-defined range
-        hiddenUntil: hiddenUntil // User selected date from the calendar
+        range: range,
+        hiddenUntil: hiddenUntil,
+        recipient_usernames: recipientString // Add the recipient usernames
       });
-      console.log(uploadResult)
+      console.log(uploadResult);
       
       // Create a new note with the server-generated ID
       const newNote: Note = {
         id: uploadResult.id,
-        title: title.trim(), // Store the title in the local note
+        title: title.trim(),
         latitude: noteLocation.latitude,
         longitude: noteLocation.longitude,
         range: uploadResult.range,
         hidden_until: uploadResult.hidden_until,
+        
       };
 
       const updatedNotes = [...savedNotes, newNote];
@@ -221,8 +283,9 @@ export default function RecordScreen() {
       setTitle("");
       setRecordingUri(null);
       setCustomLocation(null);
-      setHiddenUntil(new Date(Date.now())); // Reset to default
-      setRange(1000); // Reset range to default
+      setHiddenUntil(new Date(Date.now()));
+      setRange(1000);
+      setSelectedFriends([]);
 
       // Show success message
       Alert.alert("Success", "Voice note uploaded successfully");
@@ -235,7 +298,11 @@ export default function RecordScreen() {
   }
 
   const handleMapPress = (event: any) => {
-    setCustomLocation(event.nativeEvent.coordinate);
+    const coordinates = event.geometry.coordinates;
+    setCustomLocation({
+      latitude: coordinates[1],
+      longitude: coordinates[0]
+    });
   };
 
   const formatDuration = (milliseconds: number) => {
@@ -320,6 +387,30 @@ export default function RecordScreen() {
     }
     setShowDatePicker(true);
   };
+  
+  // Friend selection functions
+  const toggleFriendSelection = (username: string) => {
+    if (selectedFriends.includes(username)) {
+      setSelectedFriends(selectedFriends.filter(friend => friend !== username));
+    } else {
+      setSelectedFriends([...selectedFriends, username]);
+    }
+  };
+  
+  const renderFriendItem = ({ item }: { item: FollowingUser }) => (
+    <TouchableOpacity
+      style={[
+        styles.friendItem,
+        selectedFriends.includes(item.username) && styles.selectedFriendItem
+      ]}
+      onPress={() => toggleFriendSelection(item.username)}
+    >
+      <Text style={styles.friendUsername}>{item.username}</Text>
+      {selectedFriends.includes(item.username) && (
+        <CheckCircle size={20} color="#00ff9d" />
+      )}
+    </TouchableOpacity>
+  );
 
   if (!location) {
     return (
@@ -340,30 +431,42 @@ export default function RecordScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {location && (
-          <MapView
+          <MapLibreGL.MapView
+            ref={mapRef}
             style={styles.map}
-            initialRegion={{
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }}
+            mapStyle="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
             onPress={handleMapPress}
           >
-            <Marker coordinate={location.coords}>
+            <MapLibreGL.Camera
+              ref={cameraRef}
+              defaultSettings={{
+                centerCoordinate: [location.coords.longitude, location.coords.latitude],
+                zoomLevel: 14
+              }}
+            />
+            
+            {/* Current location marker */}
+            <MapLibreGL.PointAnnotation
+              id="currentLocation"
+              coordinate={[location.coords.longitude, location.coords.latitude]}
+            >
               <View style={styles.marker}>
                 <MapPin size={20} color="#fff" />
               </View>
-            </Marker>
+            </MapLibreGL.PointAnnotation>
 
+            {/* Custom location marker */}
             {customLocation && (
-              <Marker coordinate={customLocation}>
+              <MapLibreGL.PointAnnotation
+                id="customLocation"
+                coordinate={[customLocation.longitude, customLocation.latitude]}
+              >
                 <View style={[styles.marker, styles.customMarker]}>
                   <MapPin size={20} color="#fff" />
                 </View>
-              </Marker>
+              </MapLibreGL.PointAnnotation>
             )}
-          </MapView>
+          </MapLibreGL.MapView>
         )}
 
         <View style={styles.controls}>
@@ -421,6 +524,7 @@ export default function RecordScreen() {
               <Text style={styles.rangeValue}>5000m</Text>
             </View>
           </View>
+          
           {/* Date Time Selector */}
           <TouchableOpacity 
             style={styles.datePickerButton} 
@@ -445,6 +549,20 @@ export default function RecordScreen() {
               is24Hour={false}
             />
           )}
+          
+          {/* Friend Selection Button */}
+          <TouchableOpacity 
+            style={styles.friendsButton} 
+            onPress={() => setShowFriendsModal(true)}
+            disabled={isUploading}
+          >
+            <Users size={24} color="#fff" />
+            <Text style={styles.friendsButtonText}>
+              {selectedFriends.length > 0 
+                ? `Send to ${selectedFriends.length} friend${selectedFriends.length === 1 ? '' : 's'}` 
+                : "Share with friends"}
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity 
             style={styles.uploadButton} 
@@ -479,7 +597,7 @@ export default function RecordScreen() {
                 <TouchableOpacity 
                   style={styles.controlButton} 
                   onPress={() => playRecording(recordingUri)}
-                  disabled={isUploading}
+                  disabled={isUploading || isPlaying}
                 >
                   <Play size={24} color="#00ff9d" />
                 </TouchableOpacity>
@@ -513,6 +631,43 @@ export default function RecordScreen() {
           <View style={styles.bottomSpacer} />
         </View>
       </ScrollView>
+      
+      {/* Friends Selection Modal */}
+      <Modal
+        visible={showFriendsModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFriendsModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Friends</Text>
+              <TouchableOpacity onPress={() => setShowFriendsModal(false)}>
+                <X size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            
+            {followingUsers.length > 0 ? (
+              <FlatList
+                data={followingUsers}
+                renderItem={renderFriendItem}
+                keyExtractor={(item) => item.id}
+                style={styles.friendsList}
+              />
+            ) : (
+              <Text style={styles.noFriendsText}>No friends found</Text>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.doneButton}
+              onPress={() => setShowFriendsModal(false)}
+            >
+              <Text style={styles.doneButtonText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -527,7 +682,7 @@ const styles = StyleSheet.create({
   },
   map: {
     width: '100%',
-    height: 400, // Fixed height instead of percentage for better layout control
+    height: 400,
   },
   marker: {
     backgroundColor: '#ff4d4d',
@@ -692,6 +847,81 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   bottomSpacer: {
-    height: Platform.OS === 'ios' ? 50 : 20, // Extra padding at bottom
+    height: Platform.OS === 'ios' ? 50 : 20,
+  },
+  // Friend selection styles
+  friendsButton: {
+    backgroundColor: '#4a6fa5',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 15,
+  },
+  friendsButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    marginLeft: 10,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#222',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  friendsList: {
+    maxHeight: 350,
+  },
+  friendItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  selectedFriendItem: {
+    backgroundColor: 'rgba(0, 255, 157, 0.1)',
+  },
+  friendUsername: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  noFriendsText: {
+    color: '#ccc',
+    fontSize: 16,
+    textAlign: 'center',
+    padding: 20,
+  },
+  doneButton: {
+    backgroundColor: '#00ff9d',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  doneButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
