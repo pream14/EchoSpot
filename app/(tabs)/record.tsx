@@ -249,7 +249,7 @@ export default function RecordScreen() {
       
       // Join recipients into comma-separated string
       const recipientString = recipients.join(',');
-
+      
       // Upload the audio file with all parameters
       const uploadResult = await uploadAudioFile({
         audioUri: recordingUri,

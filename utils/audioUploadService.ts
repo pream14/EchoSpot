@@ -22,7 +22,7 @@ export const uploadAudioFile = async ({
   title = 'Untitled Note',
   range = 1000, // Default range in meters
   hiddenUntil = new Date(Date.now()),
-  recipient_usernames, // Default: hidden for 24 hours
+  recipient_usernames, 
 }: AudioUploadParams) => {
   try {
     // Get the access token from secure storage
@@ -52,7 +52,9 @@ export const uploadAudioFile = async ({
     formData.append('range', range.toString());
     
     // Add hidden until date
-    formData.append('hidden_until', hiddenUntil.toISOString());
+    const localISOString = new Date(hiddenUntil.getTime() - (hiddenUntil.getTimezoneOffset() * 60000)).toISOString();
+    formData.append('hidden_until', localISOString);
+    console.log("hiddenuntil:",localISOString)
     formData.append('recipient_usernames', recipient_usernames); 
     console.log("formdata",formData)
 

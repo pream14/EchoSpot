@@ -729,11 +729,6 @@ export default function ProfileScreen() {
                 </View>
                 
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Created:</Text>
-                  <Text style={styles.detailValue}>{formatDate(selectedNote.created_at)}</Text>
-                </View>
-                
-                <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Hidden Until:</Text>
                   <Text style={styles.detailValue}>{formatDate(selectedNote.hidden_until)}</Text>
                 </View>
