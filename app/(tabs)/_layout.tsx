@@ -67,15 +67,11 @@ export default function TabLayout() {
     };
     
     // Set up notification response handling
-    const subscription = addNotificationResponseListener(response => {
+    const subscription = addNotificationResponseListener(response=> {
       // Handle notification taps here
       const data = response.notification.request.content.data;
-      
-      if (data?.type === 'proximity') {
-        // Navigate to the triggered notes screen
-        // router.navigate('/TriggeredNotesScreen');
-      }
-    })as any;
+      console.log("Notification tapped:", data);
+    });
     
     setupBackgroundServices();
     

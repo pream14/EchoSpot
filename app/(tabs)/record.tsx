@@ -33,8 +33,8 @@ import * as DocumentPicker from "expo-document-picker";
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Import the upload service
-import { uploadAudioFile } from "./audioUploadService";
-import { getFollowingUsers } from "./userService"; // You'll need to create this service
+import { uploadAudioFile } from "../../utils/audioUploadService";
+import { getFollowingUsers } from "../../utils/userService"; // You'll need to create this service
 
 const MAX_DURATION = 60000; // 60 seconds
 
