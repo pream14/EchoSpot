@@ -1,14 +1,13 @@
-// app/(tabs)/settings.tsx
 import React, { useState, useEffect } from 'react';
-import { View, Text, Switch, StyleSheet, Alert,TouchableOpacity } from 'react-native';
+import { View, Text, Switch, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { Bell, Moon, Volume2, MapPin, Lock, Shield, Trash2, CircleHelp as HelpCircle } from 'lucide-react-native';
-import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter } from 'expo-router';
-
+import { startBackgroundLocationTracking, stopBackgroundLocationTracking, isBackgroundLocationTrackingEnabled, restartBackgroundLocationTracking } from '../../utils/LocationService';
+import { configureNotifications } from '../../utils/notification';
 
 export default function SettingsScreen() {
-  const router = useRouter(); // ✅ Initialize useRouter inside the component
+  const router = useRouter();
 
   const [isBackgroundTrackingEnabled, setIsBackgroundTrackingEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -17,8 +16,12 @@ export default function SettingsScreen() {
     // Check if background tracking is enabled
     const checkBackgroundTracking = async () => {
       try {
-        const enabled = await AsyncStorage.getItem('backgroundTrackingEnabled');
-        setIsBackgroundTrackingEnabled(enabled === 'true');
+        // Ensure notifications are configured
+        await configureNotifications();
+        
+        const enabled = await isBackgroundLocationTrackingEnabled();
+        console.log("Background tracking status check:", enabled);
+        setIsBackgroundTrackingEnabled(enabled);
         setIsLoading(false);
       } catch (error) {
         console.error("Error checking background tracking status:", error);
@@ -28,67 +31,60 @@ export default function SettingsScreen() {
 
     checkBackgroundTracking();
   }, []);
+
   const handleSignOut = async () => {
     try {
-      await AsyncStorage.removeItem("authToken"); // Remove stored authentication token
-      router.replace("/LoginScreen"); // Redirect to login screen
+      await AsyncStorage.removeItem("accessToken");
+      router.replace("/LoginScreen");
     } catch (error) {
       console.error("Error signing out:", error);
     }
   };
 
   const handleBackgroundTrackingToggle = async (value: boolean) => {
-    if (value) {
-      // If turning on, request permissions
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      if (foregroundStatus !== 'granted') {
-        Alert.alert(
-          'Location Permission Required',
-          'EchoSpot needs location permission to discover nearby voice notes.',
-          [{ text: 'OK' }]
-        );
-        return;
+    try {
+      if (value) {
+        // Start background tracking
+        const success = await restartBackgroundLocationTracking(); // Use restart for better reliability
+        if (!success) {
+          Alert.alert(
+            'Permission Error',
+            'Unable to start location tracking. Please check your permissions.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      } else {
+        // Stop background tracking
+        await stopBackgroundLocationTracking();
       }
-
-      const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-      if (backgroundStatus !== 'granted') {
-        Alert.alert(
-          'Background Location Permission Required',
-          'EchoSpot needs background location permission to discover nearby voice notes even when the app is closed.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      // Start background location tracking
-      const LOCATION_TASK_NAME = 'background-location-task';
-      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
       
-      if (!hasStarted) {
-        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: 300000,
-          distanceInterval: 100,
-          foregroundService: {
-            notificationTitle: "EchoSpot is using your location",
-            notificationBody: "To discover nearby voice notes",
-            notificationColor: "#00ff9d"
-          },
-        });
-      }
-    } else {
-      // Stop background location tracking
-      const LOCATION_TASK_NAME = 'background-location-task';
-      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
-      
-      if (hasStarted) {
-        await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-      }
+      setIsBackgroundTrackingEnabled(value);
+    } catch (error) {
+      console.error("Error toggling background tracking:", error);
+      Alert.alert('Error', 'Failed to change tracking settings');
     }
+  };
 
-    // Save preference
-    await AsyncStorage.setItem('backgroundTrackingEnabled', value ? 'true' : 'false');
-    setIsBackgroundTrackingEnabled(value);
+  const handleRestartTracking = async () => {
+    try {
+      setIsLoading(true);
+      await stopBackgroundLocationTracking();
+      const success = await restartBackgroundLocationTracking();
+      
+      if (success) {
+        Alert.alert('Success', 'Location tracking has been restarted');
+        setIsBackgroundTrackingEnabled(true);
+      } else {
+        Alert.alert('Error', 'Failed to restart tracking');
+      }
+      
+      setIsLoading(false);
+    } catch (error) {
+      console.error("Error restarting tracking:", error);
+      Alert.alert('Error', 'Failed to restart tracking');
+      setIsLoading(false);
+    }
   };
 
   if (isLoading) {
@@ -118,9 +114,17 @@ export default function SettingsScreen() {
         When enabled, EchoSpot will check for nearby voice notes even when the app is closed.
         This helps you discover notes left by others without having to keep the app open.
       </Text>
+      
+      {isBackgroundTrackingEnabled && (
+        <TouchableOpacity style={styles.restartButton} onPress={handleRestartTracking}>
+          <MapPin size={24} color="#00ff9d" />
+          <Text style={styles.restartButtonText}>Restart Location Tracking</Text>
+        </TouchableOpacity>
+      )}
+      
       <TouchableOpacity style={styles.dangerButton} onPress={handleSignOut}>
         <Trash2 size={24} color="#ff4d4d" />
-        <Text style={styles.dangerButtonText}>sign out</Text>
+        <Text style={styles.dangerButtonText}>Sign Out</Text>
       </TouchableOpacity>
     </View>
   );
@@ -157,7 +161,7 @@ const styles = StyleSheet.create({
     color: '#aaa',
     lineHeight: 20,
   },
-    dangerButton: {
+  dangerButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -169,6 +173,21 @@ const styles = StyleSheet.create({
   },
   dangerButtonText: {
     color: '#ff4d4d',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  restartButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#113322',
+    marginTop: 20,
+    padding: 15,
+    borderRadius: 12,
+    gap: 10,
+  },
+  restartButtonText: {
+    color: '#00ff9d',
     fontSize: 16,
     fontWeight: '600',
   },
