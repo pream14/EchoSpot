@@ -52,7 +52,23 @@
       "typedRoutes": true
     },
     "android": {
+      "intentFilters": [
+        {
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "echo-trails-backend.vercel.app",
+              "pathPrefix": "/audio/files"
+            }
+          ],
+          "action": ["VIEW"]
+          }
+        ],
       "permissions": [
+        "INTERNET",
+        "MODIFY_AUDIO_SETTINGS",
+        "ACCESS_NETWORK_STATE",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",

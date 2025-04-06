@@ -1,11 +1,21 @@
 import { Tabs } from 'expo-router';
 import { MapPin, Mic, User, Bell, Settings2 } from 'lucide-react-native';
 import { useEffect } from 'react';
-import { configureNotifications, addNotificationResponseListener, sendProximityNotification } from '../../utils/notification';
+import { Stack, useRouter } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { 
+  configureNotifications, 
+  addNotificationResponseListener, 
+  sendProximityNotification,
+  initNotificationTracker
+} from '../../utils/notification';
 import { defineLocationTask, restartBackgroundLocationTracking } from '../../utils/LocationService';
 
 export default function TabLayout() {
+  const router = useRouter();
+
   useEffect(() => {
     // Define the location task first
     defineLocationTask();
@@ -17,6 +27,9 @@ export default function TabLayout() {
       // Configure notifications first
       const notificationsConfigured = await configureNotifications();
       console.log("Notifications configured:", notificationsConfigured);
+      
+      // Make sure notification tracker is initialized
+      await initNotificationTracker();
       
       if (notificationsConfigured) {
         // Check if tracking should be enabled (from user preference)
@@ -40,8 +53,8 @@ export default function TabLayout() {
           
           // Only show notification if it's recent (within last 15 minutes)
           if (now.getTime() - timestamp.getTime() < 15 * 60 * 1000) {
-            const { count } = pendingNotifications;
-            await sendProximityNotification(count);
+            const { count, noteIds = [] } = pendingNotifications;
+            await sendProximityNotification(count, noteIds);
             console.log("Sent pending notification for", count, "notes");
           }
           
@@ -67,11 +80,23 @@ export default function TabLayout() {
     };
     
     // Set up notification response handling
-    const subscription = addNotificationResponseListener(response=> {
-      // Handle notification taps here
-      const data = response.notification.request.content.data;
-      console.log("Notification tapped:", data);
-    });
+    const subscription = addNotificationResponseListener(
+      (response: Notifications.NotificationResponse) => {
+        const data = response.notification.request.content.data;
+        if (data && data.type === 'proximity') {
+          console.log('Notification tapped, navigating to TriggeredNotesScreen');
+          // Pass the noteIds to the TriggeredNotesScreen if available
+          if (data.noteIds) {
+            router.push({
+              pathname: '/TriggeredNotesScreen',
+              params: { noteIds: JSON.stringify(data.noteIds) }
+            });
+          } else {
+            router.push('/TriggeredNotesScreen');
+          }
+        }
+      }
+    );
     
     setupBackgroundServices();
     

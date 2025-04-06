@@ -2,7 +2,46 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Store to track recently sent notifications
+let notificationTracker = {
+  lastNotificationTime: 0,
+  notifiedNoteIds: new Set(),
+};
+
+// Constants
+const NOTIFICATION_COOLDOWN = 60000; // 1 minute cooldown between similar notifications
+const NOTIFICATION_STORAGE_KEY = 'last_proximity_notification';
+
+// Load previous notification state from storage (call this on app start)
+export const initNotificationTracker = async () => {
+  try {
+    const storedData = await AsyncStorage.getItem(NOTIFICATION_STORAGE_KEY);
+    if (storedData) {
+      const parsed = JSON.parse(storedData);
+      notificationTracker = {
+        lastNotificationTime: parsed.lastNotificationTime || 0,
+        notifiedNoteIds: new Set(parsed.notifiedNoteIds || [])
+      };
+    }
+  } catch (error) {
+    console.error('Error loading notification tracker:', error);
+  }
+};
+
+// Save notification state to storage
+const saveNotificationState = async () => {
+  try {
+    const dataToStore = {
+      lastNotificationTime: notificationTracker.lastNotificationTime,
+      notifiedNoteIds: Array.from(notificationTracker.notifiedNoteIds)
+    };
+    await AsyncStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(dataToStore));
+  } catch (error) {
+    console.error('Error saving notification state:', error);
+  }
+};
 
 // Configure notifications for the app
 export const configureNotifications = async () => {
@@ -46,9 +85,97 @@ export const configureNotifications = async () => {
       });
     }
 
+    // Initialize the notification tracker
+    await initNotificationTracker();
+
     return true;
   } catch (error) {
     console.error('Error configuring notifications:', error);
+    return false;
+  }
+};
+
+// Send notification when user is near a voice note
+export const sendProximityNotification = async (count, noteIds = []) => {
+  try {
+    const now = Date.now();
+    
+    // Check if we've recently sent a notification
+    if (now - notificationTracker.lastNotificationTime < NOTIFICATION_COOLDOWN) {
+      console.log('Skipping notification: cooldown period active');
+      return false;
+    }
+    
+    // Check if we've already notified about these specific notes
+    const newNoteIds = noteIds.filter(id => !notificationTracker.notifiedNoteIds.has(id));
+    
+    // If all notes have been notified about recently, skip notification
+    if (noteIds.length > 0 && newNoteIds.length === 0) {
+      console.log('Skipping notification: already notified about these notes');
+      return false;
+    }
+    
+    // Now we can send a notification
+    const notificationContent = {
+      title: count === 1 ? 'Voice Note Discovered' : 'Voice Notes Discovered',
+      body: count === 1 
+        ? 'You found a voice note nearby. Tap to listen.' 
+        : `You found ${count} voice notes nearby. Tap to listen.`,
+      data: { 
+        type: 'proximity',
+        noteIds: noteIds 
+      },
+      sound: 'default',
+    };
+
+    await Notifications.scheduleNotificationAsync({
+      content: notificationContent,
+      trigger: null, // null means show immediately
+    });
+
+    // Update our tracker
+    notificationTracker.lastNotificationTime = now;
+    noteIds.forEach(id => notificationTracker.notifiedNoteIds.add(id));
+    
+    // Save state
+    await saveNotificationState();
+
+    console.log(`Proximity notification sent for ${count} notes`);
+    return true;
+  } catch (error) {
+    console.error('Error sending proximity notification:', error);
+    return false;
+  }
+};
+
+// Reset notification tracking for specific notes (call when notes are listened to)
+export const resetNotificationForNotes = async (noteIds) => {
+  if (!Array.isArray(noteIds)) noteIds = [noteIds];
+  
+  noteIds.forEach(id => {
+    notificationTracker.notifiedNoteIds.delete(id);
+  });
+  
+  await saveNotificationState();
+};
+
+// Reset all notification tracking (useful when testing or debugging)
+export const resetAllNotificationTracking = async () => {
+  notificationTracker = {
+    lastNotificationTime: 0,
+    notifiedNoteIds: new Set()
+  };
+  
+  await saveNotificationState();
+};
+
+// Cancel all notifications
+export const cancelAllNotifications = async () => {
+  try {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+    return true;
+  } catch (error) {
+    console.error('Error cancelling notifications:', error);
     return false;
   }
 };
@@ -63,42 +190,6 @@ export const addNotificationReceivedListener = (handler) => {
   return Notifications.addNotificationReceivedListener(handler);
 };
 
-// Send notification when user is near a voice note
-export const sendProximityNotification = async (count) => {
-  try {
-    const notificationContent = {
-      title: count === 1 ? 'Voice Note Discovered' : 'Voice Notes Discovered',
-      body: count === 1 
-        ? 'You found a voice note nearby. Tap to listen.' 
-        : `You found ${count} voice notes nearby. Tap to listen.`,
-      data: { type: 'proximity' },
-      sound: 'default',
-    };
-
-    await Notifications.scheduleNotificationAsync({
-      content: notificationContent,
-      trigger: null, // null means show immediately
-    });
-
-    console.log(`Proximity notification sent for ${count} notes`);
-    return true;
-  } catch (error) {
-    console.error('Error sending proximity notification:', error);
-    return false;
-  }
-};
-
-// Cancel all notifications
-export const cancelAllNotifications = async () => {
-  try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-    return true;
-  } catch (error) {
-    console.error('Error cancelling notifications:', error);
-    return false;
-  }
-};
-
 // Hook to handle notification navigation
 export const useNotificationNavigation = () => {
   const navigation = useNavigation();
@@ -108,7 +199,7 @@ export const useNotificationNavigation = () => {
     
     // Navigate to the TriggeredNotesScreen when notification is tapped
     if (data.type === 'proximity') {
-      navigation.navigate('TriggeredNotesScreen');
+      navigation.navigate('TriggeredNotesScreen', { noteIds: data.noteIds });
     }
   };
   
@@ -124,7 +215,7 @@ export const setupNotificationNavigation = (navigation) => {
     const data = response.notification.request.content.data;
     
     if (data.type === 'proximity') {
-      navigation.navigate('TriggeredNotesScreen');
+      navigation.navigate('TriggeredNotesScreen', { noteIds: data.noteIds });
     }
   };
   

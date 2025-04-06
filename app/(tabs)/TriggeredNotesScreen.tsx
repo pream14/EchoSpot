@@ -34,6 +34,39 @@ export default function TriggeredNotesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
 
+  // Configure audio mode
+  const setupAudio = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        staysActiveInBackground: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false
+      });
+      console.log('Audio mode configured successfully');
+      return true;
+    } catch (error) {
+      console.error('Failed to set audio mode:', error);
+      return false;
+    }
+  };
+
+  // Clear audio cache
+  const clearAudioCache = async () => {
+    try {
+      // Unload any existing sounds first
+      notes.forEach(async (note) => {
+        if (note.sound) {
+          await note.sound.unloadAsync();
+        }
+      });
+      console.log('Audio cache cleared');
+    } catch (error) {
+      console.error('Failed to clear audio cache:', error);
+    }
+  };
+
   const loadTriggeredNotes = async () => {
     try {
       // Load triggered notes data
@@ -60,19 +93,23 @@ export default function TriggeredNotesScreen() {
       // Parse notes and prepare them for display
       const parsedNotes: NoteItem[] = JSON.parse(notesJson);
       
-      // Create audio notes array with playing status, then reverse the order
+      // Create audio notes array with playing status
       const audioNotes = parsedNotes.map(note => ({
         ...note,
         playing: false
       }));
       
-      // Reverse the array to show notes in reverse order
+      // Sort by most recently discovered (we assume the list is in chronological order)
       setNotes([...audioNotes].reverse());
+      
+      // Clear any pending notifications since user has seen the notes
+      await AsyncStorage.removeItem('pendingNotifications');
       
       setLoading(false);
       setRefreshing(false);
+      console.log(`Loaded ${audioNotes.length} notes successfully`);
     } catch (error) {
-      console.error('Error loading triggered notes:', error);
+      console.error('Error loading triggered notes:', error instanceof Error ? error.message : 'Unknown error', error);
       setError('Failed to load notes');
       setLoading(false);
       setRefreshing(false);
@@ -80,13 +117,29 @@ export default function TriggeredNotesScreen() {
   };
 
   useEffect(() => {
-    loadTriggeredNotes();
+    const initialize = async () => {
+      try {
+        // Set up audio - no need to check permissions for playback
+        await setupAudio();
+        await loadTriggeredNotes();
+      } catch (error) {
+        console.error('Error in initialization:', error);
+        setError('Failed to initialize app');
+        setLoading(false);
+      }
+    };
+
+    initialize();
 
     // Clean up function to unload all sounds when component unmounts
     return () => {
       notes.forEach(async (note) => {
         if (note.sound) {
-          await note.sound.unloadAsync();
+          try {
+            await note.sound.unloadAsync();
+          } catch (error) {
+            console.error('Error unloading sound:', error);
+          }
         }
       });
     };
@@ -95,6 +148,7 @@ export default function TriggeredNotesScreen() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setError(null);
+    clearAudioCache();
     loadTriggeredNotes();
   }, []);
 
@@ -140,6 +194,8 @@ export default function TriggeredNotesScreen() {
           return newNotes;
         });
         
+        console.log(`Attempting to load audio for note: ${noteId}`);
+        
         // Create the audio source with authorization header
         const audioSource = {
           uri: `https://echo-trails-backend.vercel.app/audio/files/${noteId}/download`,
@@ -148,39 +204,54 @@ export default function TriggeredNotesScreen() {
           }
         };
         
-        // Load the audio file
-        const { sound } = await Audio.Sound.createAsync(
-          audioSource,
-          { shouldPlay: true },
-          (status) => {
-            // When playback ends - fix for TypeScript error
-            if (status.isLoaded && status.didJustFinish) {
-              setNotes(prevNotes => {
-                const newNotes = [...prevNotes];
-                const index = newNotes.findIndex(n => n.id === noteId);
-                if (index !== -1) {
-                  newNotes[index].playing = false;
-                }
-                return newNotes;
-              });
-            }
-          }
-        );
+        console.log('Audio source created:', JSON.stringify(audioSource));
         
-        // Update notes state with sound object and playing status
-        setNotes(prevNotes => {
-          const newNotes = [...prevNotes];
-          const index = newNotes.findIndex(n => n.id === noteId);
-          if (index !== -1) {
-            newNotes[index].sound = sound;
-            newNotes[index].playing = true;
-            newNotes[index].loading = false;
-          }
-          return newNotes;
-        });
+        // Load the audio file with better error handling
+        try {
+          console.log('Starting audio load process...');
+          const { sound } = await Audio.Sound.createAsync(
+            audioSource,
+            { shouldPlay: true, progressUpdateIntervalMillis: 1000 },
+            (status) => {
+              console.log('Playback status update:', JSON.stringify(status)); 
+              // When playback ends
+              if (status.isLoaded && status.didJustFinish) {
+                console.log('Playback finished for note:', noteId);
+                setNotes(prevNotes => {
+                  const newNotes = [...prevNotes];
+                  const index = newNotes.findIndex(n => n.id === noteId);
+                  if (index !== -1) {
+                    newNotes[index].playing = false;
+                  }
+                  return newNotes;
+                });
+              }
+            }
+          );
+          
+          console.log('Audio loaded successfully for note:', noteId);
+          
+          // Ensure volume is at maximum
+          await sound.setVolumeAsync(1.0);
+          
+          // Update notes state with sound object and playing status
+          setNotes(prevNotes => {
+            const newNotes = [...prevNotes];
+            const index = newNotes.findIndex(n => n.id === noteId);
+            if (index !== -1) {
+              newNotes[index].sound = sound;
+              newNotes[index].playing = true;
+              newNotes[index].loading = false;
+            }
+            return newNotes;
+          });
+        } catch (loadError) {
+          console.error('Error loading audio:', loadError instanceof Error ? loadError.message : 'Unknown load error', loadError);
+          throw loadError; // Propagate error to outer catch block
+        }
       }
     } catch (error) {
-      console.error('Error playing audio:', error);
+      console.error('Error playing audio:', error instanceof Error ? error.message : 'Unknown error', error);
       
       // Reset loading state on error
       setNotes(prevNotes => {
@@ -192,7 +263,7 @@ export default function TriggeredNotesScreen() {
         return newNotes;
       });
       
-      Alert.alert('Error', 'Failed to play audio');
+      Alert.alert('Error', 'Failed to play audio. Please try again.');
     }
   };
 
@@ -204,7 +275,7 @@ export default function TriggeredNotesScreen() {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#00ff9d" />
-        <Text style={styles.loadingText}>Loading nearby voice notes...</Text>
+        <Text style={styles.loadingText}>Loading discovered voice notes...</Text>
       </View>
     );
   }
@@ -240,8 +311,8 @@ export default function TriggeredNotesScreen() {
 
       <Text style={styles.subtitle}>
         {notes.length === 1 
-          ? 'You\'ve discovered a voice note in this area' 
-          : `You've discovered ${notes.length} voice notes in this area`}
+          ? 'You\'ve discovered a voice note' 
+          : `You've discovered ${notes.length} voice notes`}
       </Text>
 
       <ScrollView 
@@ -262,6 +333,9 @@ export default function TriggeredNotesScreen() {
             <View key={note.id} style={styles.noteCard}>
               <View style={styles.noteInfo}>
                 <Text style={styles.noteTitle}>{note.title}</Text>
+                {note.distance && (
+                  <Text style={styles.noteDistance}>Discovered {note.distance} meters away</Text>
+                )}
               </View>
               <TouchableOpacity 
                 style={[

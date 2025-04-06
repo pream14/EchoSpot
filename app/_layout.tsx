@@ -3,10 +3,8 @@ import { Stack, useRouter, useNavigationContainerRef } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
-import { 
-  configureNotifications, 
-  addNotificationResponseListener 
-} from '../utils/notification';
+import { configureNotifications } from '../utils/notification';
+
 import * as Notifications from 'expo-notifications';
 
 export default function RootLayout() {
@@ -21,7 +19,8 @@ export default function RootLayout() {
 
         if (!navigationRef.isReady()) return;
 
-        const token = await AsyncStorage.getItem('acessToken');
+        // Fixed typo in key name
+        const token = await AsyncStorage.getItem('accessToken');
         console.log('Token:', token);
 
         if (!token) {
@@ -34,7 +33,7 @@ export default function RootLayout() {
 
         if (!isTokenValid) {
           console.log('Token is invalid or expired. Redirecting...');
-          await AsyncStorage.removeItem('acessToken');
+          await AsyncStorage.removeItem('accessToken'); // Fixed typo here too
           router.replace('/LoginScreen');
         }
       } catch (error) {
