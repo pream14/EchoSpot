@@ -155,7 +155,7 @@ export const restartBackgroundLocationTracking = async () => {
     // Start location updates with foreground service
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High, // Increased accuracy
-      timeInterval: 5000, // More frequent updates: 5 seconds
+      timeInterval: 30000, // More frequent updates: 5 seconds
       distanceInterval: 2, // Smaller distance changes
       showsBackgroundLocationIndicator: true, // iOS indicator
       foregroundService, // Android foreground service

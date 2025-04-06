@@ -72,7 +72,7 @@ export default function TriggeredNotesScreen() {
       // Load triggered notes data
       const notesJson = await AsyncStorage.getItem('triggeredNotes');
       if (!notesJson) {
-        setError('No triggered notes found');
+        setError('No notification found');
         setLoading(false);
         setRefreshing(false);
         return;
@@ -435,6 +435,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ff4d4d',
     fontSize: 16,
+    marginTop:20,
     marginBottom: 20,
     textAlign: 'center',
   },

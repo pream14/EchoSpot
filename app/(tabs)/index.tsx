@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, FlatList, 
 import MapLibreGL, { MapViewRef, CameraRef } from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { MapPin, Plus, RefreshCw, Clock, ChevronRight, X } from 'lucide-react-native';
+import { MapPin, Plus, RefreshCw, Clock, ChevronRight, X, Play, Pause } from 'lucide-react-native';
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -362,9 +362,18 @@ export default function MapScreen() {
 
   const playAudio = async (audioSource: string) => {
     try {
-      // Unload any previously playing audio
+      // If already playing, pause
+      if (isPlaying && soundRef.current) {
+        await soundRef.current.pauseAsync();
+        setIsPlaying(false);
+        return;
+      }
+
+      // If sound is already loaded but paused, resume
       if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+        await soundRef.current.playAsync();
+        setIsPlaying(true);
+        return;
       }
 
       console.log('Playing audio from:', audioSource);
@@ -398,6 +407,7 @@ export default function MapScreen() {
         if (status.didJustFinish) {
           setIsPlaying(false);
           await sound.unloadAsync();
+          soundRef.current = null;
         }
       });
     } catch (error) {
@@ -425,12 +435,6 @@ export default function MapScreen() {
       return;
     }
 
-    const audioSource = note.audioUrl;
-    if (!audioSource) {
-      console.error('Error: Audio source is missing for this note', note);
-      return;
-    }
-
     // Set the selected note
     setSelectedNote(note);
 
@@ -444,18 +448,39 @@ export default function MapScreen() {
     // Use note's range if available, otherwise use default threshold
     const threshold = note.range || LOCATION_THRESHOLD;
 
+    // Mark as discovered if within range (but don't play automatically)
+    if (distance <= threshold && !note.isDiscovered) {
+      const updatedNotes = voiceNotes.map(n => 
+        n.id === note.id ? { ...n, isDiscovered: true } : n
+      );
+      setVoiceNotes(updatedNotes);
+      await AsyncStorage.setItem('savedNotes', JSON.stringify(updatedNotes));
+    }
+  };
+
+  const handlePlayButtonPress = () => {
+    if (!selectedNote || !selectedNote.audioUrl) return;
+    
+    if (!location) {
+      Alert.alert('Location Error', 'Unable to determine your location.');
+      return;
+    }
+    
+    const distance = calculateDistance(
+      location.coords.latitude,
+      location.coords.longitude,
+      selectedNote.latitude,
+      selectedNote.longitude
+    );
+    
+    // Use note's range if available, otherwise use default threshold
+    const threshold = selectedNote.range || LOCATION_THRESHOLD;
+    
     // Only play if within range
     if (distance <= threshold) {
-      await playAudio(audioSource);
-      
-      // Mark as discovered if not already
-      if (!note.isDiscovered) {
-        const updatedNotes = voiceNotes.map(n => 
-          n.id === note.id ? { ...n, isDiscovered: true } : n
-        );
-        setVoiceNotes(updatedNotes);
-        await AsyncStorage.setItem('savedNotes', JSON.stringify(updatedNotes));
-      }
+      playAudio(selectedNote.audioUrl);
+    } else {
+      Alert.alert('Out of Range', 'You must be closer to this note to play it.');
     }
   };
 
@@ -509,7 +534,7 @@ export default function MapScreen() {
           handleSingleNoteSelection(item);
           setShowNotesList(false);
         }}
-        disabled={Boolean(isLocked)}      >
+        disabled={Boolean(isLocked)}>
         <View style={styles.noteListItemContent}>
           <View>
             <Text style={styles.noteListItemTitle}>{item.title}</Text>
@@ -664,37 +689,55 @@ export default function MapScreen() {
 
       {selectedNote && !showNotesList && (
         <View style={styles.noteInfo}>
-          <Text style={styles.noteTitle}>{selectedNote.title}</Text>
-          
-          {selectedNote.hiddenUntil && new Date() < new Date(selectedNote.hiddenUntil) ? (
-            <View style={styles.lockedNote}>
-              <Clock size={16} color="#ff4d4d" style={styles.lockIcon} />
-              <Text style={styles.lockedText}>
-                {getRemainingTime(selectedNote.hiddenUntil)}
+          <View style={styles.noteInfoHeader}>
+            <View>
+              <Text style={styles.noteTitle}>{selectedNote.title}</Text>
+              
+              {selectedNote.hiddenUntil && new Date() < new Date(selectedNote.hiddenUntil) ? (
+                <View style={styles.lockedNote}>
+                  <Clock size={16} color="#ff4d4d" style={styles.lockIcon} />
+                  <Text style={styles.lockedText}>
+                    {getRemainingTime(selectedNote.hiddenUntil)}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.noteDistance}>
+                  {location && isValidCoordinate(location.coords.latitude, location.coords.longitude) &&
+                   isValidCoordinate(selectedNote.latitude, selectedNote.longitude)
+                    ? `${Math.round(
+                        calculateDistance(
+                          location.coords.latitude,
+                          location.coords.longitude,
+                          selectedNote.latitude,
+                          selectedNote.longitude
+                        )
+                      )} meters away`
+                    : 'Calculating distance...'}
+                </Text>
+              )}
+              
+              <Text style={styles.noteDistance}>
+                {location && isValidCoordinate(location.coords.latitude, location.coords.longitude) &&
+                 isValidCoordinate(selectedNote.latitude, selectedNote.longitude)
+                  ? `${selectedNote.range} meter range`
+                  : 'Calculating range...'}
               </Text>
             </View>
-          ) : (
-            <Text style={styles.noteDistance}>
-              {location && isValidCoordinate(location.coords.latitude, location.coords.longitude) &&
-               isValidCoordinate(selectedNote.latitude, selectedNote.longitude)
-                ? `${Math.round(
-                    calculateDistance(
-                      location.coords.latitude,
-                      location.coords.longitude,
-                      selectedNote.latitude,
-                      selectedNote.longitude
-                    )
-                  )} meters away`
-                : 'Calculating distance...'}
-            </Text>
             
-          )}
-          <Text style={styles.noteDistance}>
-            {location && isValidCoordinate(location.coords.latitude, location.coords.longitude) &&
-             isValidCoordinate(selectedNote.latitude, selectedNote.longitude)
-              ? `${selectedNote.range} meter range`
-              : 'Calculating range...'}
-          </Text>
+            {/* Play button only shown for notes that aren't hidden */}
+            {!(selectedNote.hiddenUntil && new Date() < new Date(selectedNote.hiddenUntil)) && (
+              <TouchableOpacity 
+                style={[styles.playButton, isPlaying && styles.pauseButton]} 
+                onPress={handlePlayButtonPress}
+              >
+                {isPlaying ? (
+                  <Pause size={24} color="#fff" />
+                ) : (
+                  <Play size={24} color="#fff" />
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       )}
 
@@ -765,16 +808,42 @@ const styles = StyleSheet.create({
     borderColor: '#add8e6',
   },
   markerDiscovered: { backgroundColor: '#1a1a1a' },
-  noteInfo: { position: 'absolute', bottom: 20, left: 20, right: 20, backgroundColor: 'rgba(26, 26, 26, 0.9)', padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#333' },
+  noteInfo: { 
+    position: 'absolute', 
+    bottom: 20, 
+    left: 20, 
+    right: 20, 
+    backgroundColor: 'rgba(26, 26, 26, 0.9)', 
+    padding: 20, 
+    borderRadius: 12, 
+    borderWidth: 1, 
+    borderColor: '#333' 
+  },
+  noteInfoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
   noteTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
   noteDistance: { fontSize: 14, color: '#888' },
-  addButton: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#00ff9d', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
+  addButton: { position: 'absolute', bottom: 200, right: 20, backgroundColor: '#00ff9d', width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
   refreshButton: { position: 'absolute', top: 50, right: 20, backgroundColor: '#ff4d4d', width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   errorText: { color: '#ff4d4d', textAlign: 'center', marginTop: 20 },
   lockedNote: { flexDirection: 'row', alignItems: 'center' },
   lockedText: { color: '#ff4d4d', fontSize: 14, marginLeft: 4 },
   lockIcon: { marginRight: 4 },
+  playButton: {
+    backgroundColor: '#00ff9d',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pauseButton: {
+    backgroundColor: '#ff4d4d',
+  },
   statsContainer: { 
     position: 'absolute', 
     top: 50, 
@@ -793,7 +862,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(26, 26, 26, 0.95)',
+    backgroundColor: 'rgba(26, 26, 26, 0.9)',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderWidth: 1,

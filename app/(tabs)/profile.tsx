@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, Modal, Alert, RefreshControl, FlatList, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Bell, MapPin, User,Calendar, X, Mic, Trash2, UserPlus, UserCheck, UserX, Users, Search } from 'lucide-react-native';
+import { Bell, MapPin, User, Calendar, X, Mic, Trash2, UserPlus, UserCheck, UserX, Users, Search } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 interface UserProfile {
@@ -11,6 +11,7 @@ interface UserProfile {
   joinedDate: string;
   timeSinceJoining?: { value: number; label: string };
   followingCount?: number;
+  followersCount?: number;
 }
 
 interface VoiceNote {
@@ -56,6 +57,7 @@ export default function ProfileScreen() {
   const [pendingRequests, setPendingRequests] = useState<FollowRequest[]>([]);
   const [socialModalVisible, setSocialModalVisible] = useState(false);
   const [socialModalType, setSocialModalType] = useState<'following' | 'followers' | 'requests' | 'search'>('following');
+  const [isRemovingFollower, setIsRemovingFollower] = useState(false);
   
   // Search functionality states
   const [usernameInput, setUsernameInput] = useState('');
@@ -69,6 +71,7 @@ export default function ProfileScreen() {
       await loadProfile();
       await fetchVoiceNotes();
       await fetchFollowing();
+      await fetchFollowers();
       await fetchPendingRequests();
       setError(null);
     } catch (err) {
@@ -93,6 +96,16 @@ export default function ProfileScreen() {
       }));
     }
   }, [voiceNotes]);
+
+  // Update profile when followers change
+  useEffect(() => {
+    if (profile && followers.length >= 0) {
+      setProfile(prevProfile => ({
+        ...prevProfile!,
+        followersCount: followers.length
+      }));
+    }
+  }, [followers]);
 
   // Clear success message after a timeout
   useEffect(() => {
@@ -154,7 +167,8 @@ export default function ProfileScreen() {
         notesCount: 0, // This will be updated after fetching voice notes
         joinedDate: new Date(data.user_data.created_at).toDateString(),
         timeSinceJoining,
-        followingCount: 0  // Will be updated after fetching following
+        followingCount: 0,  // Will be updated after fetching following
+        followersCount: 0   // Will be updated after fetching followers
       };
 
       setProfile(userProfile);
@@ -165,6 +179,7 @@ export default function ProfileScreen() {
       throw new Error(errorMessage);
     }
   };
+  
   const fetchAllUsers = async () => {
     try {
       setIsSearching(true);
@@ -195,7 +210,6 @@ export default function ProfileScreen() {
       setIsSearching(false);
     }
   };
-
 
   const fetchVoiceNotes = async () => {
     try {
@@ -257,6 +271,39 @@ export default function ProfileScreen() {
       throw err;
     }
   };
+
+  // Add new function to fetch followers
+  const fetchFollowers = async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) throw new Error('No token found');
+  
+      const response = await fetch('https://echo-trails-backend.vercel.app/users/followers', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+  
+      if (!response.ok) throw new Error('Failed to fetch followers');
+  
+      const data = await response.json();
+      setFollowers(data || []);
+      
+      // Update the followersCount in profile
+      setProfile(prevProfile => ({
+        ...prevProfile!,
+        followersCount: data?.length || 0
+      }));
+      
+      return data;
+    } catch (err) {
+      console.error('Error fetching followers:', err);
+      throw err;
+    }
+  };
+
   const fetchPendingRequests = async () => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
@@ -304,7 +351,7 @@ export default function ProfileScreen() {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to send follow request');
       }
-      console.log(response)
+      
       // Show success message
       setRequestSuccess(`Follow request sent to ${username}`);
       
@@ -337,9 +384,10 @@ export default function ProfileScreen() {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to accept follow request');
       }
-      console.log("success accept",response.json())
+      
       // Remove from pending requests and refresh followers
       setPendingRequests(prevRequests => prevRequests.filter(req => req.id !== requesterId));
+      fetchFollowers(); // Refresh the followers list
       
       Alert.alert('Success', 'Follow request accepted');
       return true;
@@ -366,7 +414,7 @@ export default function ProfileScreen() {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to reject follow request');
       }
-      console.log("reject",response.json())
+      
       // Remove from pending requests
       setPendingRequests(prevRequests => prevRequests.filter(req => req.id !== requesterId));
       
@@ -419,10 +467,11 @@ export default function ProfileScreen() {
 
   const removeFollower = async (username: string) => {
     try {
+      setIsRemovingFollower(true);
       const token = await AsyncStorage.getItem('accessToken');
       if (!token) throw new Error('No token found');
 
-      const response = await fetch(`https://echo-trails-backend.vercel.app/followers/remove/${username}`, {
+      const response = await fetch(`https://echo-trails-backend.vercel.app/users/followers/remove/${username}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -436,28 +485,40 @@ export default function ProfileScreen() {
       }
 
       // Remove from followers list
-      setFollowers(prevFollowers => prevFollowers.filter(user => user.username !== username));
+      setFollowers(prevFollowers => {
+        const newFollowers = prevFollowers.filter(user => user.username !== username);
+        
+        // Update profile followersCount as well
+        setProfile(prevProfile => ({
+          ...prevProfile!,
+          followersCount: newFollowers.length
+        }));
+        
+        return newFollowers;
+      });
       
       Alert.alert('Success', `Successfully removed ${username} from your followers`);
       return true;
     } catch (err) {
       Alert.alert('Error', (err as Error).message || 'Failed to remove follower');
       return false;
+    } finally {
+      setIsRemovingFollower(false);
     }
   };
 
   const openSocialModal = (type: 'following' | 'followers' | 'requests' | 'search') => {
-  setSocialModalType(type);
-  setSocialModalVisible(true);
-  
-  // Fetch all users when opening search modal
-  if (type === 'search') {
-    fetchAllUsers();
-    setTimeout(() => {
-      usernameInputRef.current?.focus();
-    }, 300);
-  }
-};
+    setSocialModalType(type);
+    setSocialModalVisible(true);
+    
+    // Fetch all users when opening search modal
+    if (type === 'search') {
+      fetchAllUsers();
+      setTimeout(() => {
+        usernameInputRef.current?.focus();
+      }, 300);
+    }
+  };
 
   const closeSocialModal = () => {
     setSocialModalVisible(false);
@@ -476,6 +537,7 @@ export default function ProfileScreen() {
       Alert.alert('Error', 'Please enter a username');
     }
   };
+  
   const searchUsers = (text: string) => {
     setUsernameInput(text);
     
@@ -632,12 +694,12 @@ export default function ProfileScreen() {
           
           <TouchableOpacity 
             style={styles.statItem}
-            onPress={() => Alert.alert('Activity Streak', `You've been active for ${profile?.timeSinceJoining?.value || 0} ${profile?.timeSinceJoining?.label || 'Days'}!`)}
+            onPress={() => openSocialModal('followers')}
           >
-            <Calendar size={24} color="#00ff9d" />
-            <Text style={styles.statNumber}>{profile?.timeSinceJoining?.value || 0}</Text>
-            <Text style={styles.statLabel}>Days Active</Text>
-            </TouchableOpacity>
+            <Users size={24} color="#00ff9d" />
+            <Text style={styles.statNumber}>{profile?.followersCount || 0}</Text>
+            <Text style={styles.statLabel}>Followers</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Find Users button */}
@@ -771,7 +833,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* Social Modal - Updated for direct follow request */}
+      {/* Social Modal - Support for followers view */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -793,20 +855,20 @@ export default function ProfileScreen() {
             </View>
 
             {/* Direct follow request form - replaces search */}
-{socialModalType === 'search' && (
-  <View style={styles.followRequestContainer}>
-    <Text style={styles.followRequestLabel}>Search users to follow:</Text>
-    <View style={styles.usernameInputContainer}>
-      <TextInput
-        ref={usernameInputRef}
-        style={styles.usernameInput}
-        placeholder="Search by username"
-        placeholderTextColor="#777"
-        value={usernameInput}
-        onChangeText={searchUsers}
-        returnKeyType="search"
-        autoCapitalize="none"
-      />
+            {socialModalType === 'search' && (
+              <View style={styles.followRequestContainer}>
+                <Text style={styles.followRequestLabel}>Search users to follow:</Text>
+                <View style={styles.usernameInputContainer}>
+                  <TextInput
+                    ref={usernameInputRef}
+                    style={styles.usernameInput}
+                    placeholder="Search by username"
+                    placeholderTextColor="#777"
+                    value={usernameInput}
+                    onChangeText={searchUsers}
+                    returnKeyType="search"
+                    autoCapitalize="none"
+                  />
       {isSearching && (
         <View style={styles.searchingIndicator}>
           <Text style={styles.searchingText}>Loading...</Text>
@@ -1111,7 +1173,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2a2a2a',
     borderRadius: 15,
     padding: 20,
-    maxHeight: '80%',
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
