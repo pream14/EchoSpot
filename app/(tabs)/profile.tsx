@@ -666,10 +666,14 @@ export default function ProfileScreen() {
       )}
 
       <View style={styles.header}>
-
+      <View style={styles.profileIconContainer}>
+          <User size={40} color="#00ff9d" />
+        </View>
       </View>
 
       <View style={styles.content}>
+        {/* Added Person icon from Lucide above username */}
+
         <Text style={styles.name}>{profile?.username}</Text>
         <Text style={styles.email}>{profile?.email}</Text>
 
@@ -885,8 +889,8 @@ export default function ProfileScreen() {
     <FlatList
   data={searchResults}
   keyExtractor={(item) => item.id}
-  style={styles.searchResultsList} // Add this style
-  contentContainerStyle={styles.searchResultsContent} // Add this style
+  style={styles.searchResultsList}
+  contentContainerStyle={styles.searchResultsContent}
   renderItem={({ item }) => (
     <View style={styles.userItem}>
       <View style={styles.userInfo}>
@@ -993,9 +997,6 @@ export default function ProfileScreen() {
   );
 }
 
-// Add these new style definitions to your existing styles
-
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1033,6 +1034,11 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
+  },
+  // Added new profileIconContainer style for the Person icon
+  profileIconContainer: {
+    alignItems: 'center',
+    marginTop: 150,
   },
   name: {
     fontSize: 24,
@@ -1105,7 +1111,8 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     fontWeight: 'bold',
     fontSize: 12,
-  },searchResultsList: {
+  },
+  searchResultsList: {
     width: '100%',
     maxHeight: 300, // Limit height to ensure it stays in the modal
     flexGrow: 0,
@@ -1339,14 +1346,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   searchingIndicator: {
-  position: 'absolute',
-  right: 60,
-  top: 10,
-},
-searchingText: {
-  color: '#00ff9d',
-  fontSize: 14,
-},
+    position: 'absolute',
+    right: 60,
+    top: 10,
+  },
+  searchingText: {
+    color: '#00ff9d',
+    fontSize: 14,
+  },
   // Missing styles that are referenced in the component
   followRequestContainer: {
     padding: 10,

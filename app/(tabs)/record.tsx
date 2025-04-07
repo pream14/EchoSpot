@@ -223,7 +223,7 @@ export default function RecordScreen() {
 
   async function saveVoiceNote() {
     if (!recordingUri) return;
-
+  
     try {
       // Validate title is provided
       if (!title.trim()) {
@@ -231,8 +231,14 @@ export default function RecordScreen() {
         return;
       }
       
+      // Validate at least one recipient is selected
+      if (selectedFriends.length === 0) {
+        Alert.alert("Error", "Please select at least one recipient.");
+        return;
+      }
+      
       setIsUploading(true);
-
+  
       let noteLocation = customLocation || location?.coords;
       if (!noteLocation) {
         Alert.alert("Error", "No valid location available.");
@@ -240,14 +246,10 @@ export default function RecordScreen() {
         return;
       }
       
-      // Create recipient list - if no friends selected, include current user
-      let recipients = selectedFriends.length > 0 ? [...selectedFriends] : [];
-      // Always include current user if they have a username
-      if (username && !recipients.includes(username)) {
-        recipients.push(username);
-      }
+      // Get the list of selected recipients
+      let recipients = [...selectedFriends];
       
-      // Join recipients into comma-separated string
+      // Create a list of recipient usernames
       const recipientString = recipients.join(',');
       
       // Upload the audio file with all parameters
@@ -258,7 +260,7 @@ export default function RecordScreen() {
         longitude: noteLocation.longitude,
         range: range,
         hiddenUntil: hiddenUntil,
-        recipient_usernames: recipientString // Add the recipient usernames
+        recipient_usernames: recipientString // Recipient usernames
       });
       console.log(uploadResult);
       
@@ -270,15 +272,14 @@ export default function RecordScreen() {
         longitude: noteLocation.longitude,
         range: uploadResult.range,
         hidden_until: uploadResult.hidden_until,
-        
       };
-
+  
       const updatedNotes = [...savedNotes, newNote];
       setSavedNotes(updatedNotes);
       
       // Save to local storage
       await AsyncStorage.setItem("savedNotes", JSON.stringify(updatedNotes));
-
+  
       // Reset form state
       setTitle("");
       setRecordingUri(null);
@@ -286,7 +287,7 @@ export default function RecordScreen() {
       setHiddenUntil(new Date(Date.now()));
       setRange(1000);
       setSelectedFriends([]);
-
+  
       // Show success message
       Alert.alert("Success", "Voice note uploaded successfully");
     } catch (error) {
@@ -397,7 +398,14 @@ export default function RecordScreen() {
     }
   };
   
-  const renderFriendItem = ({ item }: { item: FollowingUser }) => (
+  // Prepare the list of all possible recipients including the current user
+  const prepareRecipientsForModal = () => {
+    // Make sure the modal shows current user as an option
+    setShowFriendsModal(true);
+  };
+  
+  // Render friend/user item in the selection list
+  const renderRecipientItem = ({ item }: { item: FollowingUser }) => (
     <TouchableOpacity
       style={[
         styles.friendItem,
@@ -405,7 +413,9 @@ export default function RecordScreen() {
       ]}
       onPress={() => toggleFriendSelection(item.username)}
     >
-      <Text style={styles.friendUsername}>{item.username}</Text>
+      <Text style={styles.friendUsername}>
+        {item.username === username ? `${item.username} (You)` : item.username}
+      </Text>
       {selectedFriends.includes(item.username) && (
         <CheckCircle size={20} color="#00ff9d" />
       )}
@@ -419,6 +429,13 @@ export default function RecordScreen() {
       </View>
     );
   }
+
+  // Create a combined list of recipients for the modal (current user + friends)
+  const allRecipients = [
+    // Add current user to the top of the list if username exists
+    ...(username ? [{ id: 'self', username }] : []),
+    ...followingUsers
+  ];
 
   return (
     <KeyboardAvoidingView
@@ -553,27 +570,27 @@ export default function RecordScreen() {
           {/* Friend Selection Button */}
           <TouchableOpacity 
             style={styles.friendsButton} 
-            onPress={() => setShowFriendsModal(true)}
+            onPress={prepareRecipientsForModal}
             disabled={isUploading}
           >
             <Users size={24} color="#fff" />
             <Text style={styles.friendsButtonText}>
               {selectedFriends.length > 0 
-                ? `Send to ${selectedFriends.length} friend${selectedFriends.length === 1 ? '' : 's'}` 
-                : "Share with friends"}
+                ? `Send to ${selectedFriends.length} recipient${selectedFriends.length === 1 ? '' : 's'}` 
+                : "Select recipients"}
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={styles.uploadButton} 
-            onPress={pickAudioFile}
-            disabled={isUploading}
-          >
-            <Upload size={24} color="#fff" />
-            <Text style={styles.uploadText}>Upload</Text>
-          </TouchableOpacity>
+          {/* Upload and Record Buttons - Side by Side */}
+          <View style={styles.mainButtonRow}>
+            <TouchableOpacity 
+              style={styles.uploadButton} 
+              onPress={pickAudioFile}
+              disabled={isUploading}
+            >
+              <Upload size={24} color="#fff" />
+            </TouchableOpacity>
 
-          <View style={styles.buttonRow}>
             {isRecording ? (
               <TouchableOpacity 
                 style={[styles.recordButton, styles.recording]} 
@@ -591,37 +608,38 @@ export default function RecordScreen() {
                 <Mic size={32} color="#fff" />
               </TouchableOpacity>
             )}
+          </View>
 
-            {recordingUri && (
-              <>
+          {/* Play, Stop, and Save Buttons - Below */}
+          {recordingUri && (
+            <View style={styles.controlButtonRow}>
+              <TouchableOpacity 
+                style={styles.controlButton} 
+                onPress={() => playRecording(recordingUri)}
+                disabled={isUploading || isPlaying}
+              >
+                <Play size={24} color="#00ff9d" />
+              </TouchableOpacity>
+
+              {isPlaying && (
                 <TouchableOpacity 
                   style={styles.controlButton} 
-                  onPress={() => playRecording(recordingUri)}
-                  disabled={isUploading || isPlaying}
-                >
-                  <Play size={24} color="#00ff9d" />
-                </TouchableOpacity>
-
-                {isPlaying && (
-                  <TouchableOpacity 
-                    style={styles.controlButton} 
-                    onPress={stopPlayback}
-                    disabled={isUploading}
-                  >
-                    <StopCircle size={24} color="#ff4d4d" />
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity 
-                  style={styles.controlButton} 
-                  onPress={saveVoiceNote}
+                  onPress={stopPlayback}
                   disabled={isUploading}
                 >
-                  <Save size={24} color={isUploading ? "#666" : "#00ff9d"} />
+                  <StopCircle size={24} color="#ff4d4d" />
                 </TouchableOpacity>
-              </>
-            )}
-          </View>
+              )}
+
+              <TouchableOpacity 
+                style={styles.controlButton} 
+                onPress={saveVoiceNote}
+                disabled={isUploading}
+              >
+                <Save size={24} color={isUploading ? "#666" : "#00ff9d"} />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {isUploading && (
             <Text style={styles.uploadingText}>Uploading...</Text>
@@ -642,21 +660,21 @@ export default function RecordScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Friends</Text>
+              <Text style={styles.modalTitle}>Select Recipients</Text>
               <TouchableOpacity onPress={() => setShowFriendsModal(false)}>
                 <X size={24} color="#fff" />
               </TouchableOpacity>
             </View>
             
-            {followingUsers.length > 0 ? (
+            {allRecipients.length > 0 ? (
               <FlatList
-                data={followingUsers}
-                renderItem={renderFriendItem}
+                data={allRecipients}
+                renderItem={renderRecipientItem}
                 keyExtractor={(item) => item.id}
                 style={styles.friendsList}
               />
             ) : (
-              <Text style={styles.noFriendsText}>No friends found</Text>
+              <Text style={styles.noFriendsText}>No recipients available</Text>
             )}
             
             <TouchableOpacity 
@@ -694,42 +712,6 @@ const styles = StyleSheet.create({
   customMarker: {
     backgroundColor: '#00ff9d',
   },
-  uploadButton: {
-    backgroundColor: 'green',
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    elevation: 5,
-    shadowColor: '#00c9ff',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    flexDirection: 'row',
-    marginVertical: 15,
-  },
-  datePickerButton: {
-    backgroundColor: '#444',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 15,
-  },
-  dateText: {
-    color: '#fff',
-    fontSize: 16,
-    marginLeft: 10,
-  },
-  uploadText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
   controls: {
     padding: 20,
   },
@@ -763,16 +745,33 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginVertical: 20,
   },
-  buttonRow: {
+  // Main buttons row (upload and record)
+  mainButtonRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-around',
     alignItems: 'center',
-    gap: 20,
     marginVertical: 20,
   },
+  uploadButton: {
+    width: 50,
+    height: 50,
+    backgroundColor: 'green',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    flexDirection: 'row',
+  },
+
   recordButton: {
-    width: 80,
-    height: 80,
+    width: 50,
+    height: 50,
     borderRadius: 40,
     backgroundColor: '#ff4d4d',
     justifyContent: 'center',
@@ -785,6 +784,13 @@ const styles = StyleSheet.create({
   },
   recording: {
     backgroundColor: '#666',
+  },
+  controlButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 20,
+    marginBottom: 20,
   },
   controlButton: {
     width: 50,
@@ -845,6 +851,20 @@ const styles = StyleSheet.create({
   rangeValue: {
     color: '#999',
     fontSize: 14,
+  },
+  datePickerButton: {
+    backgroundColor: '#444',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 15,
+  },
+  dateText: {
+    color: '#fff',
+    fontSize: 16,
+    marginLeft: 10,
   },
   bottomSpacer: {
     height: Platform.OS === 'ios' ? 50 : 20,

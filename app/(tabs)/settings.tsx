@@ -111,7 +111,7 @@ export default function SettingsScreen() {
       </View>
       
       <Text style={styles.helpText}>
-        When enabled, EchoSpot will check for nearby voice notes even when the app is closed.
+        When enabled, EchoTrails will check for nearby voice notes even when the app is closed.
         This helps you discover notes left by others without having to keep the app open.
       </Text>
       

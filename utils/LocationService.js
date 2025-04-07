@@ -68,7 +68,7 @@ export const defineLocationTask = () => {
           console.log(`Note "${note.title}": Distance=${distance}m, Threshold=${proximityThreshold}m`);
           
           // Check if within proximity threshold and also check time lock if applicable
-          const isUnlocked = !note.unlockTime || new Date(note.unlockTime) <= new Date();
+          const isUnlocked = !note.hidden_until || new Date(note.hidden_until) <= new Date();
           
           // If user is within range of the note
           if (distance <= proximityThreshold && isUnlocked) {
